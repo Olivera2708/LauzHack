@@ -1,15 +1,20 @@
-import google.generativeai as genai
+import os
+import openai
 from app.core.config import settings
 from app.schemas.plan import OrchestrationPlan
 import json
 import uuid
+from typing import Dict, List, Any
 
 # In-memory storage for chat history
-# Structure: { session_id: [ { role: "user"|"model", parts: [...] } ] }
-chat_sessions = {}
+# Structure: { session_id: [ { role: "user"|"assistant", content: str } ] }
+chat_sessions: Dict[str, List[Dict[str, str]]] = {}
 
-if settings.GEMINI_API_KEY:
-    genai.configure(api_key=settings.GEMINI_API_KEY)
+# Initialize OpenAI client for Gemini via OpenAI API
+client = openai.OpenAI(
+    api_key=settings.GEMINI_API_KEY,
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+) if settings.GEMINI_API_KEY else None
 
 SYSTEM_PROMPT = """
 You are an expert React Architect. Your goal is to gather requirements for a React web application and then generate a detailed orchestration plan.
@@ -38,8 +43,49 @@ You are an expert React Architect. Your goal is to gather requirements for a Rea
 }
 """
 
-async def process_chat(instructions: str, session_id: str = None):
-    if not settings.GEMINI_API_KEY:
+def _fix_common_json_issues(json_str: str) -> str:
+    """
+    Attempt to fix common JSON syntax issues that might occur in LLM responses.
+    
+    Args:
+        json_str: The potentially malformed JSON string
+        
+    Returns:
+        Fixed JSON string
+    """
+    # Remove any trailing commas before closing braces/brackets
+    import re
+    
+    # Fix trailing commas before closing braces
+    json_str = re.sub(r',(\s*})', r'\1', json_str)
+    
+    # Fix trailing commas before closing brackets
+    json_str = re.sub(r',(\s*])', r'\1', json_str)
+    
+    # Fix missing commas between object properties (basic heuristic)
+    # This is more complex and might need refinement
+    json_str = re.sub(r'"\s*\n\s*"', r'",\n    "', json_str)
+    
+    # Fix missing commas between array elements
+    json_str = re.sub(r'}\s*\n\s*{', r'},\n    {', json_str)
+    
+    # Fix null props values - replace with empty strings
+    json_str = re.sub(r'"props":\s*null', r'"props": ""', json_str)
+    
+    return json_str
+
+async def process_chat(instructions: str, session_id: str = None) -> Dict[str, Any]:
+    """
+    Process chat instructions using OpenAI API with Gemini model.
+    
+    Args:
+        instructions: User instructions for the React application
+        session_id: Optional session ID for maintaining chat history
+        
+    Returns:
+        Dictionary containing response type, content, and session_id
+    """
+    if not client:
         return {
             "type": "error",
             "content": "GEMINI_API_KEY is not set.",
@@ -50,29 +96,43 @@ async def process_chat(instructions: str, session_id: str = None):
         session_id = str(uuid.uuid4())
         chat_sessions[session_id] = []
 
+    # Get chat history for this session
     history = chat_sessions.get(session_id, [])
     
-    # Initialize model
-    model = genai.GenerativeModel(
-        model_name=settings.GEMINI_MODEL,
-        system_instruction=SYSTEM_PROMPT
-    )
-    
-    # Start chat with history
-    chat = model.start_chat(history=history)
+    # Prepare messages for OpenAI API
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.extend(history)
+    messages.append({"role": "user", "content": instructions})
     
     try:
-        response = chat.send_message(instructions)
+        response = client.chat.completions.create(
+            model=settings.ORCHESTRATOR_MODEL,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=4000
+        )
         
-        # Update our local history (Gemini object manages its own, but we might want to persist it later)
-        # For now, relying on the chat object's state within the scope if we kept it alive, 
-        # but since we recreate the model/chat each time (stateless service), we need to pass history.
-        # Actually, `start_chat(history=...)` expects a specific format.
-        # Let's update our stored history.
-        chat_sessions[session_id].append({"role": "user", "parts": [instructions]})
-        chat_sessions[session_id].append({"role": "model", "parts": [response.text]})
+        # Check if response and content exist
+        if not response or not response.choices or len(response.choices) == 0:
+            return {
+                "type": "error",
+                "content": "No response received from Gemini API",
+                "session_id": session_id
+            }
         
-        response_text = response.text.strip()
+        message_content = response.choices[0].message.content
+        if message_content is None:
+            return {
+                "type": "error",
+                "content": "Gemini API returned empty content. This might be due to incorrect API endpoint or model configuration.",
+                "session_id": session_id
+            }
+        
+        response_text = message_content.strip()
+        
+        # Update chat history
+        chat_sessions[session_id].append({"role": "user", "content": instructions})
+        chat_sessions[session_id].append({"role": "assistant", "content": response_text})
         
         # Try to parse as JSON to see if it's the plan
         try:
@@ -81,16 +141,48 @@ async def process_chat(instructions: str, session_id: str = None):
                 start = response_text.find("{")
                 end = response_text.rfind("}") + 1
                 json_str = response_text[start:end]
+                print(f"DEBUG: Extracted JSON string (first 200 chars): {json_str[:200]}...")
+                
+                # Try to fix common JSON issues
+                json_str = _fix_common_json_issues(json_str)
+                
                 plan_data = json.loads(json_str)
+                print(f"DEBUG: JSON parsing successful, keys: {list(plan_data.keys())}")
                 # Validate with Pydantic
                 plan = OrchestrationPlan(**plan_data)
+                print(f"DEBUG: Pydantic validation successful")
                 return {
                     "type": "plan",
                     "content": plan,
                     "session_id": session_id
                 }
-        except (json.JSONDecodeError, ValueError):
-            pass
+            else:
+                print(f"DEBUG: No JSON braces found in response")
+        except json.JSONDecodeError as e:
+            print(f"DEBUG: JSON decode error: {e}")
+            print(f"DEBUG: Problematic JSON around error: {json_str[max(0, e.pos-50):e.pos+50]}")
+            # Return error with more details
+            return {
+                "type": "error",
+                "content": f"Gemini generated malformed JSON: {str(e)}. Please try again.",
+                "session_id": session_id
+            }
+        except ValueError as e:
+            print(f"DEBUG: Pydantic validation error: {e}")
+            return {
+                "type": "error", 
+                "content": f"Generated plan doesn't match expected schema: {str(e)}",
+                "session_id": session_id
+            }
+        except Exception as e:
+            print(f"DEBUG: Unexpected error during JSON parsing: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "type": "error",
+                "content": f"Unexpected error processing plan: {str(e)}",
+                "session_id": session_id
+            }
             
         # If not JSON, it's a question/text response
         return {
