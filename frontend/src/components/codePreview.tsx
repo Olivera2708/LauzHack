@@ -25,7 +25,7 @@ const CodePreview: React.FC<CodePreviewProps> = ({ initialCode }) => {
         setTimeout(() => {
             // Use one of these public React app URLs for testing:
             const testUrls = [
-                'https://react-todo-app-demo.netlify.app/',
+                'https://6922473187d6fcabc4f8e3e5--react-preview-1763854124.netlify.app',
             ]
 
             // Pick a random demo app URL

@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect, type KeyboardEvent } from 'react';
+import React, {useState, useRef, useEffect, type KeyboardEvent, type JSX} from 'react';
 import { Send, User, Bot, Sun, Moon, Trash2, Copy, Check, Code } from 'lucide-react';
 import type {Message} from '../types/types.ts';
-import CodePreview from './CodePreview';
+import CodePreview from './codePreview.tsx';
 
 const Home: React.FC = () => {
     const [messages, setMessages] = useState<Message[]>([]);
@@ -189,7 +189,7 @@ const Home: React.FC = () => {
                             <Bot size={24} className="text-white" />
                         </div>
                         <div>
-                            <h1 className="text-xl font-bold">DeepSeek Chat</h1>
+                            <h1 className="text-xl font-bold">AI Chat</h1>
                             <p className={`text-sm ${
                                 darkMode ? 'text-gray-400' : 'text-gray-600'
                             }`}>
