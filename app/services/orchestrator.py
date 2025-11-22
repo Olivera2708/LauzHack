@@ -1,4 +1,4 @@
-import google.generativeai as genai
+import openai
 from app.core.config import settings
 from app.schemas.plan import OrchestrationPlan
 import json
@@ -7,8 +7,12 @@ import uuid
 # In-memory storage for chat history
 chat_sessions = {}
 
-if settings.GEMINI_API_KEY:
-    genai.configure(api_key=settings.GEMINI_API_KEY)
+# Initialize OpenAI client
+orchestrator_api_key = settings.get_orchestrator_api_key()
+client = openai.OpenAI(
+    api_key=orchestrator_api_key,
+    base_url=settings.ORCHESTRATOR_BASE_URL,
+) if orchestrator_api_key else None
 
 SYSTEM_PROMPT = """
 You are an expert React Architect and UI Designer. Your goal is to generate a precise, error-free orchestration plan for a modern React application.
@@ -95,10 +99,10 @@ Return ONLY valid JSON.
 """
 
 async def process_chat(instructions: str, session_id: str = None):
-    if not settings.GEMINI_API_KEY:
+    if not client:
         return {
             "type": "error",
-            "content": "GEMINI_API_KEY is not set.",
+            "content": "API key is not set for the configured orchestrator provider.",
             "session_id": session_id
         }
 
@@ -108,23 +112,46 @@ async def process_chat(instructions: str, session_id: str = None):
 
     history = chat_sessions.get(session_id, [])
     
-    # Initialize model
-    model = genai.GenerativeModel(
-        model_name=settings.GEMINI_MODEL,
-        system_instruction=SYSTEM_PROMPT
-    )
+    # Prepare messages for OpenAI API
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     
-    # Start chat with history
-    chat = model.start_chat(history=history)
+    # Convert history to OpenAI format
+    for msg in history:
+        if "parts" in msg:
+            content = msg["parts"][0] if msg["parts"] else ""
+            role = "user" if msg["role"] == "user" else "assistant"
+            messages.append({"role": role, "content": content})
+    
+    messages.append({"role": "user", "content": instructions})
     
     try:
-        response = chat.send_message(instructions)
+        response = client.chat.completions.create(
+            model=settings.ORCHESTRATOR_MODEL,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=30000
+        )
+        
+        if not response or not response.choices or len(response.choices) == 0:
+            return {
+                "type": "error",
+                "content": "No response received from OpenAI API",
+                "session_id": session_id
+            }
+        
+        response_text = response.choices[0].message.content
+        if not response_text:
+            return {
+                "type": "error",
+                "content": "OpenAI API returned empty content",
+                "session_id": session_id
+            }
         
         # Update history
         chat_sessions[session_id].append({"role": "user", "parts": [instructions]})
-        chat_sessions[session_id].append({"role": "model", "parts": [response.text]})
+        chat_sessions[session_id].append({"role": "model", "parts": [response_text]})
         
-        response_text = response.text.strip()
+        response_text = response_text.strip()
         
         # Try to parse as JSON
         try:

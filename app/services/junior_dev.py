@@ -10,11 +10,12 @@ import uuid
 # Structure: { session_id: [ { role: "user"|"assistant", content: str } ] }
 junior_sessions: Dict[str, List[Dict[str, str]]] = {}
 
-# Initialize OpenAI client for Together.ai
+# Initialize OpenAI client
+junior_dev_api_key = settings.get_junior_dev_api_key()
 client = openai.OpenAI(
-    api_key=os.environ.get("TOGETHER_API_KEY"),
-    base_url="https://api.together.xyz/v1",
-) if settings.TOGETHER_API_KEY else None
+    api_key=junior_dev_api_key,
+    base_url=settings.JUNIOR_DEV_BASE_URL,
+) if junior_dev_api_key else None
 
 JUNIOR_DEV_SYSTEM_PROMPT = """
 You are a skilled Junior React Developer. Your role is to implement React components based on detailed specifications provided by the orchestrator.
@@ -61,7 +62,7 @@ async def implement_component(
     if not client:
         return {
             "type": "error",
-            "content": "TOGETHER_API_KEY is not set.",
+            "content": "API key is not set for the configured junior dev provider.",
             "session_id": session_id
         }
 
@@ -84,9 +85,9 @@ async def implement_component(
     messages.append({"role": "user", "content": implementation_request})
     
     try:
-        print(f"DEBUG: Calling Together.ai API for {file_plan.filename}")
+        print(f"DEBUG: Calling OpenAI API for {file_plan.filename}")
         response = client.chat.completions.create(
-            model=settings.JUNIOR_MODEL,
+            model=settings.JUNIOR_DEV_MODEL,
             messages=messages,
             temperature=0.3,  # Lower temperature for more consistent code generation
             max_tokens=3000
@@ -96,19 +97,19 @@ async def implement_component(
         
         # Check if response and content exist
         if not response or not response.choices or len(response.choices) == 0:
-            print(f"DEBUG: No response received from Together.ai API")
+            print(f"DEBUG: No response received from OpenAI API")
             return {
                 "type": "error",
-                "content": f"No response received from Together.ai API",
+                "content": f"No response received from OpenAI API",
                 "session_id": session_id
             }
         
         message_content = response.choices[0].message.content
         if message_content is None:
-            print(f"DEBUG: Together.ai API returned empty content")
+            print(f"DEBUG: OpenAI API returned empty content")
             return {
                 "type": "error",
-                "content": f"Together.ai API returned empty content",
+                "content": f"OpenAI API returned empty content",
                 "session_id": session_id
             }
         
