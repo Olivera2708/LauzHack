@@ -1,5 +1,5 @@
 import React, {useState, useRef, useEffect, type KeyboardEvent, type JSX} from 'react';
-import { Send, User, Bot, Sun, Moon, Trash2, Copy, Check, Code } from 'lucide-react';
+import { Send, User, Bot, Sun, Moon, Trash2, Copy, Check, Code, Image, X } from 'lucide-react';
 import type {Message} from '../types/types.ts';
 import CodePreview from './codePreview.tsx';
 
@@ -11,6 +11,26 @@ const Home: React.FC = () => {
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [showCodePreview, setShowCodePreview] = useState<boolean>(true);
     const [previewCode, setPreviewCode] = useState<string>('');
+    const [imagePreview, setImagePreview] = useState<string>('');
+    const [selectedImage, setSelectedImage] = useState<File | null>(null);
+
+    // Add these functions
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setSelectedImage(file);
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                setImagePreview(e.target?.result as string);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const removeImage = () => {
+        setSelectedImage(null);
+        setImagePreview('');
+    };
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -57,53 +77,69 @@ const Home: React.FC = () => {
     }, [messages]);
 
     const handleSend = async (): Promise<void> => {
-        if (!input.trim() || isLoading) return;
+        if ((!input.trim() && !selectedImage) || isLoading) return;
 
+        // Create user message with image
         const userMessage: Message = {
             id: Date.now().toString(),
             content: input,
             role: 'user',
-            timestamp: new Date()
+            timestamp: new Date(),
+            image: selectedImage ? imagePreview : undefined
         };
 
         setMessages(prev => [...prev, userMessage]);
-        setInput('');
-        setIsLoading(true);
 
-        // Simulate AI response - ALWAYS include code for testing
-        setTimeout(() => {
-            const testCode = `function Example() {
-      const [count, setCount] = useState(0)
-      
-      return (
-        <div style={{ padding: '20px', textAlign: 'center' }}>
-          <h3>Counter Example</h3>
-          <p>Count: {count}</p>
-          <button 
-            onClick={() => setCount(count + 1)}
-            style={{ margin: '5px', padding: '8px 16px' }}
-          >
-            Increment
-          </button>
-          <button 
-            onClick={() => setCount(count - 1)}
-            style={{ margin: '5px', padding: '8px 16px' }}
-          >
-            Decrement
-          </button>
-        </div>
-      )
-    }`.trim();
+        // Send to backend API
+        try {
+            setIsLoading(true);
 
+            const response = await fetch('http://localhost:8000/test', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    message: input,
+                    image_data: selectedImage ? imagePreview : null
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log('✅ Backend response:', data);
+
+            // Create AI response based on backend reply
             const aiMessage: Message = {
                 id: (Date.now() + 1).toString(),
-                content: `I received your message: "${input}". This is a simulated response from the AI assistant.\n\nHere's some example code:\n\n\`\`\`typescript\n${testCode}\n\`\`\``,
+                content: `Backend says: "${data.message}"\n\nReceived at: ${data.backend_timestamp}\n\nData: ${JSON.stringify(data.received_data, null, 2)}`,
                 role: 'assistant',
                 timestamp: new Date()
             };
+
             setMessages(prev => [...prev, aiMessage]);
+
+        } catch (error) {
+            console.error('❌ API call failed:', error);
+
+            // Fallback to simulated response if API fails
+            const aiMessage: Message = {
+                id: (Date.now() + 1).toString(),
+                content: `API call failed: ${error instanceof Error ? error.message : 'Unknown error'}\n\nThis is a fallback simulated response.`,
+                role: 'assistant',
+                timestamp: new Date()
+            };
+
+            setMessages(prev => [...prev, aiMessage]);
+        } finally {
+            setInput('');
+            setSelectedImage(null);
+            setImagePreview('');
             setIsLoading(false);
-        }, 2000);
+        }
     };
 
     const handleKeyPress = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -288,6 +324,16 @@ const Home: React.FC = () => {
                                                     ? (darkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white')
                                                     : (darkMode ? 'bg-gray-800' : 'bg-white border border-gray-200')
                                             }`}>
+                                                {/* Display image if present */}
+                                                {message.image && (
+                                                    <div className="mb-3">
+                                                        <img
+                                                            src={message.image}
+                                                            alt="Uploaded"
+                                                            className="max-w-xs max-h-48 rounded-lg"
+                                                        />
+                                                    </div>
+                                                )}
                                                 <div className="prose prose-invert max-w-none">
                                                     {formatContent(message.content)}
                                                 </div>
@@ -326,32 +372,63 @@ const Home: React.FC = () => {
                     </main>
 
                     {/* Input Area */}
-                    <footer className={`border-t ${
+                    {/* Input Area */}
+                    <footer className={`border-t flex-shrink-0 ${
                         darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-200'
                     }`}>
                         <div className="p-4">
+                            {/* Image Preview */}
+                            {imagePreview && (
+                                <div className="mb-3 relative inline-block">
+                                    <img
+                                        src={imagePreview}
+                                        alt="Preview"
+                                        className="h-20 w-20 object-cover rounded-lg border"
+                                    />
+                                    <button
+                                        onClick={removeImage}
+                                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                            )}
+
                             <div className={`relative rounded-lg border ${
                                 darkMode
                                     ? 'bg-gray-800 border-gray-600 focus-within:border-blue-500'
                                     : 'bg-white border-gray-300 focus-within:border-blue-500'
                             } transition-colors`}>
-                                <textarea
-                                    ref={textareaRef}
-                                    value={input}
-                                    onChange={(e) => setInput(e.target.value)}
-                                    onKeyPress={handleKeyPress}
-                                    placeholder="Message DeepSeek..."
-                                    className={`w-full px-4 py-3 pr-12 resize-none focus:outline-none ${
-                                        darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'
-                                    }`}
-                                    rows={1}
-                                    style={{ minHeight: '56px', maxHeight: '200px' }}
-                                />
+            <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Message AI assistant or upload an image..."
+                className={`w-full px-4 py-3 pr-24 resize-none focus:outline-none ${
+                    darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'
+                }`}
+                rows={1}
+                style={{ minHeight: '56px', maxHeight: '200px' }}
+            />
+
+                                {/* Image Upload Button */}
+                                <label className="absolute right-12 bottom-2 p-2 rounded-lg transition-colors cursor-pointer bg-gray-600 hover:bg-gray-700 text-white">
+                                    <Image size={16} />
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleImageUpload}
+                                        className="hidden"
+                                    />
+                                </label>
+
+                                {/* Send Button */}
                                 <button
                                     onClick={handleSend}
-                                    disabled={!input.trim() || isLoading}
+                                    disabled={(!input.trim() && !selectedImage) || isLoading}
                                     className={`absolute right-2 bottom-2 p-2 rounded-lg transition-colors ${
-                                        input.trim() && !isLoading
+                                        (input.trim() || selectedImage) && !isLoading
                                             ? (darkMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-500 hover:bg-blue-600 text-white')
                                             : (darkMode ? 'bg-gray-700 text-gray-500' : 'bg-gray-300 text-gray-400')
                                     }`}
@@ -363,7 +440,7 @@ const Home: React.FC = () => {
                             <div className={`text-xs text-center mt-2 ${
                                 darkMode ? 'text-gray-500' : 'text-gray-400'
                             }`}>
-                                DeepSeek can make mistakes. Consider checking important information.
+                                You can upload images for analysis
                             </div>
                         </div>
                     </footer>

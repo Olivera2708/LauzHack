@@ -7,9 +7,18 @@ import json
 from typing import Optional
 import traceback  # Add this import
 import time
+from fastapi.middleware.cors import CORSMiddleware
+
 
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for testing
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods including OPTIONS
+    allow_headers=["*"],  # Allow all headers
+)
 class DeployRequest(BaseModel):
     project_path: str
 
@@ -17,6 +26,48 @@ class DeployResponse(BaseModel):
     url: str
     success: bool
     message: str
+
+# Add these new models
+class TestRequest(BaseModel):
+    message: str
+    image_data: Optional[str] = None  # base64 encoded image
+
+class TestResponse(BaseModel):
+    success: bool
+    message: str
+    received_data: dict
+    backend_timestamp: str
+
+# Add this test route (before your existing /deploy route)
+@app.post("/test", response_model=TestResponse)
+async def test_endpoint(request: TestRequest):
+    """
+    Test endpoint that prints received data and returns a response
+    """
+    print("🔵 TEST ENDPOINT CALLED!")
+    print(f"📨 Received message: {request.message}")
+    
+    if request.image_data:
+        print(f"🖼️ Received image data (first 100 chars): {request.image_data[:100]}...")
+        image_size = len(request.image_data)
+        print(f"📊 Image data size: {image_size} characters")
+    else:
+        print("📭 No image data received")
+    
+    # Print all headers and request info
+    print("📋 Request details logged successfully")
+    
+    return TestResponse(
+        success=True,
+        message="Backend received your data successfully!",
+        received_data={
+            "message": request.message,
+            "has_image": bool(request.image_data),
+            "image_size": len(request.image_data) if request.image_data else 0
+        },
+        backend_timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
+    )
+
 
 @app.post("/deploy", response_model=DeployResponse)
 async def deploy_react_app(request: DeployRequest):

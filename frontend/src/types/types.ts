@@ -4,6 +4,7 @@ export interface Message {
     content: string;
     role: 'user' | 'assistant';
     timestamp: Date;
+    image: string | undefined;
 }
 
 export interface ChatState {
