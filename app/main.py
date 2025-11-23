@@ -1,10 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.core.config import settings
+
 from app.api.v1.endpoints import instructions
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
+from app.core.config import settings
 
 
 app = FastAPI(title=settings.PROJECT_NAME)
@@ -16,6 +14,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Documentation-URL"],
 )
 
 # Include routers
@@ -24,6 +23,7 @@ app.include_router(
     prefix=f"{settings.API_V1_STR}/instructions",
     tags=["instructions"]
 )
+
 
 @app.get("/")
 async def root():
