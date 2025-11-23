@@ -9,3 +9,4 @@ venv/
 # Generated preview builds
 persistent_builds/
 app/persistent_builds/
+frontend/.vite
