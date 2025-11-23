@@ -34,11 +34,16 @@ JUNIOR_DEV_SYSTEM_PROMPT = """
     - Parse the `dependencies` list exactly as provided.
     - Group imports: React hooks $\rightarrow$ 3rd party libraries $\rightarrow$ Local components $\rightarrow$ Utilities.
     - Do not import libraries that are not listed in `dependencies` unless they are standard React hooks (`useState`, `useEffect`, etc).
+    - **CRITICAL Import Rules:**
+      - **Local components** (from relative paths like `./components/Navbar`, `./pages/Home`, or `@/components/CustomComponent`): Use **default imports** (e.g., `import Navbar from './components/Navbar'`).
+      - **Third-party libraries and shadcn/ui components** (from `@/components/ui/*`, `lucide-react`, `react-router-dom`, etc.): Use **named imports** (e.g., `import { Button } from '@/components/ui/button'`).
+      - If a dependency has only ONE import and it's a local component file, use default import syntax.
 2.  **Interfaces:**
     - Use the exact `props` string provided in the JSON input.
     - Export the interface.
 3.  **Component Structure:**
-    - Use `const` with named export matching the `filename` (minus extension).
+    - Use `const` with the component name matching the `filename` (minus extension).
+    - Export the component as a **default export** using `export default ComponentName`.
     - Destructure props in the function signature.
     - Return `null` if critical data is missing (defensive coding).
 4.  **Hooks:**
@@ -47,6 +52,10 @@ JUNIOR_DEV_SYSTEM_PROMPT = """
 5.  **JSX:**
     - Use semantic HTML (`<section>`, `<article>`, `<button>`) where possible.
     - Ensure all accessibility attributes (`aria-label`, `role`) are present if interactive.
+    - **CRITICAL: Escape special characters in text content:**
+      - The `>` character MUST be escaped as `{'>'}` or `&gt;` when used in text content (e.g., terminal prompts, console output).
+      - The `<` character MUST be escaped as `{'<'}` or `&lt;` when used in text content.
+      - Example: `<div>> Initializing...</div>` is INVALID. Use `<div>{'>'} Initializing...</div>` or `<div>&gt; Initializing...</div>` instead.
 
 ### 3. Implementation Steps (Internal Monologue)
 Before generating code, ensure you have:
@@ -104,7 +113,7 @@ export interface StatsCardProps {
   isPositive?: boolean; 
 }
 
-export const StatsCard: React.FC<StatsCardProps> = ({ 
+const StatsCard: React.FC<StatsCardProps> = ({ 
   title, 
   value, 
   trend, 
@@ -131,6 +140,8 @@ export const StatsCard: React.FC<StatsCardProps> = ({
     </Card>
   );
 };
+
+export default StatsCard;
 ```
 """
 

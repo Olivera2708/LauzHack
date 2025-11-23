@@ -8,7 +8,7 @@ class Settings:
     API_V1_STR: str = "/api/v1"
 
     # Model configurations
-    ORCHESTRATOR_MODEL: str = os.getenv("ORCHESTRATOR_MODEL", "gemini-2.5-flash")
+    ORCHESTRATOR_MODEL: str = os.getenv("ORCHESTRATOR_MODEL", "gemini-3-pro-preview")
     JUNIOR_DEV_MODEL: str = os.getenv("JUNIOR_DEV_MODEL", "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8")
 
     # Base URLs for API endpoints
