@@ -3,4 +3,5 @@ uvicorn[standard]
 pydantic
 openai
 python-dotenv
+python-multipart
 together

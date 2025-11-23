@@ -3,6 +3,7 @@ from app.core.config import settings
 from app.schemas.plan import OrchestrationPlan
 import json
 import uuid
+from typing import List, Optional, Dict, Any
 
 # In-memory storage for chat history
 chat_sessions = {}
@@ -17,6 +18,15 @@ client = openai.OpenAI(
 SYSTEM_PROMPT = """
 You are an expert React Architect and UI Designer. Your goal is to generate a precise, error-free orchestration plan for a modern React application.
 
+### 0. CRITICAL: Image Analysis
+If images (sketches, designs, mockups) are provided:
+- **Carefully analyze** all visual elements, layouts, components, and design patterns shown in the images
+- **Extract** specific UI components, their arrangements, colors, spacing, and interactions
+- **Combine** the visual information from images with any text instructions provided
+- **Generate** the orchestration plan based on BOTH the images and text instructions
+- If images show specific designs or sketches, prioritize implementing those designs accurately
+- Describe visual elements in your plan (colors, layouts, component types, etc.) based on what you see in the images
+
 ### 1. CRITICAL: Environment & File Structure
 The project relies on a specific file structure. You MUST follow this exactly.
 - **Root Alias**: `@/` maps to `./src/`
@@ -28,7 +38,7 @@ The project relies on a specific file structure. You MUST follow this exactly.
 - **Entry Point**: `src/App.tsx` MUST be the main entry point, defining routes and layout.
 
 ### 2. CRITICAL: Pre-Installed Components (DO NOT CREATE THESE)
-The following components exist. You MUST import them from the correct path, none of the other components exist in ui folder:
+The following components exist. You MUST import them from the correct pathnone of the other components exist in ui folder:
 - `@/components/ui/accordion`: `Accordion`, `AccordionItem`, `AccordionTrigger`, `AccordionContent`
 - `@/components/ui/avatar`: `Avatar`, `AvatarImage`, `AvatarFallback`
 - `@/components/ui/badge`: `Badge`
@@ -51,8 +61,7 @@ The following components exist. You MUST import them from the correct path, none
 - `@/components/ui/tabs`: `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent`
 - `@/components/ui/textarea`: `Textarea`
 - `@/components/ui/tooltip`: `TooltipProvider`, `Tooltip`, `TooltipTrigger`, `TooltipContent`
-
-**Import Rule**: ALWAYS use the `@/components/ui/<kebab-case-name>` path.
+There are no other components in the ui folder.
 Example: `import { Button } from "@/components/ui/button"`
 
 ### 3. CRITICAL: Application Structure Requirements
@@ -267,7 +276,15 @@ Return ONLY valid JSON.
 - Always include a root route (`"/"`) that typically renders the home page or redirects to `/home`.
 """
 
-async def process_chat(instructions: str, session_id: str = None):
+async def process_chat(instructions: str, session_id: str = None, images: Optional[List[Dict[str, str]]] = None):
+    """
+    Process chat instructions with optional images.
+    
+    Args:
+        instructions: Text instructions
+        session_id: Optional session ID
+        images: Optional list of image dictionaries with 'mime_type' and 'data' (base64) keys
+    """
     if not client:
         return {
             "type": "error",
@@ -291,13 +308,45 @@ async def process_chat(instructions: str, session_id: str = None):
             role = "user" if msg["role"] == "user" else "assistant"
             messages.append({"role": role, "content": content})
     
-    messages.append({"role": "user", "content": instructions})
+    # Build user message with text and images
+    user_content = []
+    
+    # Add text instructions
+    if instructions:
+        user_content.append({
+            "type": "text",
+            "text": instructions
+        })
+    
+    # Add images if provided
+    if images:
+        print(f"[process_chat] Adding {len(images)} image(s) to the request")
+        for image_data in images:
+            mime_type = image_data.get("mime_type", "image/jpeg")
+            base64_data = image_data.get("data", "")
+            
+            # Format for OpenAI-compatible API (works with Gemini too)
+            user_content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime_type};base64,{base64_data}"
+                }
+            })
+    
+    # If no content, add empty text
+    if not user_content:
+        user_content.append({
+            "type": "text",
+            "text": ""
+        })
+    
+    messages.append({"role": "user", "content": user_content})
     
     try:
         response = client.chat.completions.create(
             model=settings.ORCHESTRATOR_MODEL,
             messages=messages,
-            temperature=0.3,
+            temperature=0.0,
             max_tokens=30000
         )
         
@@ -316,8 +365,9 @@ async def process_chat(instructions: str, session_id: str = None):
                 "session_id": session_id
             }
         
-        # Update history
-        chat_sessions[session_id].append({"role": "user", "parts": [instructions]})
+        # Update history (store text instructions for history, images are not stored)
+        history_text = instructions if instructions else "[Image-based request]"
+        chat_sessions[session_id].append({"role": "user", "parts": [history_text]})
         chat_sessions[session_id].append({"role": "model", "parts": [response_text]})
         
         response_text = response_text.strip()

@@ -29,7 +29,34 @@ JUNIOR_DEV_SYSTEM_PROMPT = """
 - **Icons:** `lucide-react` (default) or as specified in imports.
 - **Strictness:** NO usage of `any` type. All props must be typed.
 
-### 2. Coding Standards
+### 2. CRITICAL: Pre-Installed Components (DO NOT CREATE THESE)
+The following components exist. You MUST import them from the correct pathnone of the other components exist in ui folder:
+- `@/components/ui/accordion`: `Accordion`, `AccordionItem`, `AccordionTrigger`, `AccordionContent`
+- `@/components/ui/avatar`: `Avatar`, `AvatarImage`, `AvatarFallback`
+- `@/components/ui/badge`: `Badge`
+- `@/components/ui/breadcrumb`: `Breadcrumb`, `BreadcrumbList`, `BreadcrumbItem`, `BreadcrumbLink`, `BreadcrumbPage`, `BreadcrumbSeparator`
+- `@/components/ui/button`: `Button`
+- `@/components/ui/card`: `Card`, `CardHeader`, `CardTitle`, `CardContent`, `CardFooter`
+- `@/components/ui/checkbox`: `Checkbox`
+- `@/components/ui/dialog`: `Dialog`, `DialogTrigger`, `DialogContent`, `DialogHeader`, `DialogTitle`
+- `@/components/ui/dropdown-menu`: `DropdownMenu`, `DropdownMenuTrigger`, `DropdownMenuContent`, `DropdownMenuItem`
+- `@/components/ui/hover-card`: `HoverCard`, `HoverCardTrigger`, `HoverCardContent`
+- `@/components/ui/input`: `Input`
+- `@/components/ui/label`: `Label`
+- `@/components/ui/popover`: `Popover`, `PopoverTrigger`, `PopoverContent`
+- `@/components/ui/progress`: `Progress`
+- `@/components/ui/select`: `Select`, `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem`
+- `@/components/ui/separator`: `Separator`
+- `@/components/ui/sheet`: `Sheet`, `SheetTrigger`, `SheetClose`, `SheetPortal`, `SheetOverlay`, `SheetContent`, `SheetHeader`, `SheetFooter`, `SheetTitle`, `SheetDescription`
+- `@/components/ui/skeleton`: `Skeleton`
+- `@/components/ui/switch`: `Switch`
+- `@/components/ui/tabs`: `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent`
+- `@/components/ui/textarea`: `Textarea`
+- `@/components/ui/tooltip`: `TooltipProvider`, `Tooltip`, `TooltipTrigger`, `TooltipContent`
+There are no other components in the ui folder.
+Example: `import { Button } from "@/components/ui/button"`
+
+### 3. Coding Standards
 1.  **Imports:**
     - Parse the `dependencies` list exactly as provided.
     - Group imports: React hooks $\rightarrow$ 3rd party libraries $\rightarrow$ Local components $\rightarrow$ Utilities.
@@ -57,14 +84,25 @@ JUNIOR_DEV_SYSTEM_PROMPT = """
       - The `<` character MUST be escaped as `{'<'}` or `&lt;` when used in text content.
       - Example: `<div>> Initializing...</div>` is INVALID. Use `<div>{'>'} Initializing...</div>` or `<div>&gt; Initializing...</div>` instead.
 
-### 3. Implementation Steps (Internal Monologue)
+### 4. CRITICAL: Route Handling
+- **MANDATORY**: If a `routes` array is provided in the specifications, you MUST use EXACTLY those routes as specified.
+- **Route Path Matching**: Route paths (the `name` field) MUST be used exactly as provided - case-sensitive, no modifications.
+- **For Navbar Components**: Use the exact route paths from the `routes` array in `Link` components' `to` prop (e.g., `<Link to="/home">Home</Link>`).
+- **For App.tsx Components**: Use the exact route paths from the `routes` array in `Route` components' `path` prop (e.g., `<Route path="/home" element={<Home />} />`).
+- **Component Name Matching**: The `component` field in routes specifies which component to render - use it exactly as specified.
+- **DO NOT**: Modify, add, remove, or change route paths. Use them exactly as provided in the `routes` array.
+- **DO NOT**: Create routes that are not in the provided `routes` array.
+- **DO NOT**: Use different route paths than those specified.
+
+### 5. Implementation Steps (Internal Monologue)
 Before generating code, ensure you have:
 1.  Parsed `dependencies` to generate import statements.
 2.  Inserted the `props` interface definition exactly.
-3.  Implemented the functions listed in `functions` with appropriate logic.
-4.  Constructed the JSX tree with Tailwind classes.
+3.  If `routes` are provided, parsed them to use exact route paths in Link/Route components.
+4.  Implemented the functions listed in `functions` with appropriate logic.
+5.  Constructed the JSX tree with Tailwind classes.
 
-### 4. Output Format Rules
+### 6. Output Format Rules
 - **Start:** `import React ...`
 - **End:** Close the component function.
 - **No Markdown Wrappers:** Output *only* the code block if requested, otherwise standard markdown code fencing.
@@ -72,7 +110,7 @@ Before generating code, ensure you have:
 
 ---
 
-### Example Input (from Orchestrator):
+### 6. Example Input (from Orchestrator):
 ```json
 {
   "path": "src/components/dashboard",
@@ -100,7 +138,7 @@ Before generating code, ensure you have:
 }
 ```
 
-### Example Output (Expected Behavior):
+### 7. Example Output (Expected Behavior):
 ```tsx
 import React from 'react';
 import { ArrowUp, ArrowDown } from 'lucide-react';
@@ -222,8 +260,8 @@ async def implement_component(
         response = client.chat.completions.create(
             model=settings.JUNIOR_DEV_MODEL,
             messages=messages,
-            temperature=0.3,  # Lower temperature for more consistent code generation
-            max_tokens=30000
+            temperature=0.0,  # Lower temperature for more consistent code generation
+            max_tokens=30000    
         )
         
         print(f"DEBUG: API response received for {file_plan.filename}")
@@ -310,6 +348,19 @@ def _prepare_implementation_request(
         for dep in file_plan.dependencies:
             imports_str = ", ".join([imp.name for imp in dep.imports])
             request_parts.append(f"- Import {imports_str} from {dep.from_path}")
+    
+    if file_plan.routes:
+        request_parts.extend([
+            "",
+            "**CRITICAL: Routes (MUST USE EXACTLY AS SPECIFIED):**"
+        ])
+        for route in file_plan.routes:
+            request_parts.append(f"- Route path: '{route.name}' -> Component: '{route.component}'")
+        request_parts.append("")
+        request_parts.append("**IMPORTANT**: You MUST use these exact route paths in your implementation:")
+        request_parts.append("- For Navbar/Link components: Use the exact path in the 'to' prop (e.g., `<Link to=\"/home\">`)")
+        request_parts.append("- For App.tsx/Route components: Use the exact path in the 'path' prop (e.g., `<Route path=\"/home\" element={<Home />} />`)")
+        request_parts.append("- DO NOT modify, add, remove, or change these routes. Use them exactly as specified.")
     
     if global_style:
         request_parts.extend([

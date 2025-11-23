@@ -4,9 +4,11 @@ import shutil
 import zipfile
 import tempfile
 import uuid
+import base64
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from fastapi import APIRouter, Body
+from typing import List, Optional, Union
+from fastapi import APIRouter, Body, File, UploadFile, Form, Request
 from fastapi.responses import FileResponse
 from app.services.orchestrator import process_chat
 from app.services.junior_dev import implement_component
@@ -19,20 +21,93 @@ def _run_implement_component(file_plan, global_style, session_id):
     return asyncio.run(implement_component(file_plan, global_style, session_id))
 
 @router.post("/process")
-async def process_instructions(
-    instructions: str = Body(..., embed=True),
-    session_id: str = Body(None, embed=True)
-):
+async def process_instructions(request: Request):
     """
-    Endpoint to receive instructions, process them with parallel agents, and return a zip file.
+    Endpoint to receive instructions (with optional images/sketches), process them with parallel agents, and return a zip file.
+    
+    Supports both:
+    - JSON format (backward compatible): {"instructions": "...", "session_id": "..."}
+    - Multipart/form-data format (with images): form data with instructions, session_id, and optional images
+    
+    Args:
+        request: FastAPI request object to detect content type and handle form data
+        instructions: Text instructions describing what to build (from JSON body or form)
+        session_id: Optional session ID for maintaining context
     """
+    # Handle multipart/form-data requests (for images)
+    content_type = request.headers.get("content-type", "")
+    image_data_list = []
+    instructions = None
+    session_id = None
+    
+    if "multipart/form-data" in content_type:
+        # Parse form data manually for multipart requests
+        form = await request.form()
+        instructions = form.get("instructions", "")
+        session_id = form.get("session_id")
+        
+        # Handle images from form data
+        image_files = form.getlist("images")
+        if not image_files:
+            # Try single file upload
+            image_file = form.get("images")
+            if image_file and hasattr(image_file, 'read'):
+                image_files = [image_file]
+        
+        if image_files:
+            print(f"[process_instructions] Processing {len(image_files)} image(s)...")
+            for idx, image_file in enumerate(image_files):
+                try:
+                    # Read image content
+                    if hasattr(image_file, 'read'):
+                        image_content = await image_file.read()
+                        mime_type = image_file.content_type or "image/jpeg"
+                    else:
+                        # Handle string file paths if needed
+                        continue
+                    
+                    # Convert to base64
+                    image_base64 = base64.b64encode(image_content).decode('utf-8')
+                    image_data_list.append({
+                        "mime_type": mime_type,
+                        "data": image_base64
+                    })
+                    filename = getattr(image_file, 'filename', f'image_{idx}')
+                    print(f"[process_instructions]   Image {idx+1}: {filename}, type: {mime_type}, size: {len(image_content)} bytes")
+                except Exception as e:
+                    print(f"[process_instructions]   ERROR processing image {idx+1}: {str(e)}")
+                    # Continue with other images even if one fails
+            print(f"[process_instructions] Successfully processed {len(image_data_list)} image(s)")
+    
+    # Handle JSON requests (backward compatible)
+    elif "application/json" in content_type:
+        try:
+            body = await request.json()
+            instructions = body.get("instructions", "")
+            session_id = body.get("session_id")
+        except Exception as e:
+            print(f"[process_instructions] Error parsing JSON body: {str(e)}")
+            return {
+                "type": "error",
+                "content": f"Invalid JSON body: {str(e)}",
+                "session_id": session_id
+            }
+    
+    # Validate instructions
+    if not instructions:
+        return {
+            "type": "error",
+            "content": "Instructions are required",
+            "session_id": session_id
+        }
+    
     print(f"[process_instructions] Starting - session_id: {session_id}")
     print(f"[process_instructions] Instructions received: {instructions[:100]}...")
     
     try:
-        # Step 1: Get orchestration plan
+        # Step 1: Get orchestration plan (with images if provided)
         print("[process_instructions] Step 1: Calling orchestrator to get plan...")
-        result = await process_chat(instructions, session_id)
+        result = await process_chat(instructions, session_id, images=image_data_list if image_data_list else None)
         print(f"[process_instructions] Orchestrator result type: {result.get('type')}")
         print(f"[process_instructions] Orchestrator result: {result}")
         
