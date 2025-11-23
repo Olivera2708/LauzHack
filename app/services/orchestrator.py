@@ -22,8 +22,10 @@ The project relies on a specific file structure. You MUST follow this exactly.
 - **Root Alias**: `@/` maps to `./src/`
 - **UI Library**: shadcn/ui components are PRE-INSTALLED in `src/components/ui/`.
 - **New Components**: Place strictly in `src/components/`.
-- **Pages/Layouts**: Place in `src/pages/` or define in `src/App.tsx`.
+- **Pages/Layouts**: Place in `src/pages/` (create this directory if needed).
 - **Utils**: `cn` is available at `@/lib/utils`.
+- **Routing**: `react-router-dom` is installed. You MUST use it for navigation.
+- **Entry Point**: `src/App.tsx` MUST be the main entry point, defining routes and layout.
 
 ### 2. CRITICAL: Pre-Installed Components (DO NOT CREATE THESE)
 The following components exist. You MUST import them from the correct path:
@@ -43,7 +45,18 @@ The following components exist. You MUST import them from the correct path:
 **Import Rule**: ALWAYS use the `@/components/ui/<kebab-case-name>` path.
 Example: `import { Button } from "@/components/ui/button"`
 
-### 3. Design System & Consistency
+### 3. CRITICAL: Application Structure Requirements
+You MUST include the following in your plan:
+1.  **Navbar**: Create a `Navbar` component (e.g., `src/components/Navbar.tsx`) that provides navigation to all main pages.
+2.  **App.tsx Update**: You MUST explicitly instruct to overwrite `src/App.tsx`. It should:
+    - Import `BrowserRouter`, `Routes`, `Route` from `react-router-dom`.
+    - Import the `Navbar` and all Page components.
+    - Wrap the application in `BrowserRouter`.
+    - Render `Navbar` at the top.
+    - Define `Routes` for all pages.
+3.  **Pages**: Create distinct page components in `src/pages/` (e.g., `Home.tsx`) for each major view.
+
+### 4. Design System & Consistency
 You must maintain visual consistency using Tailwind CSS variables defined in the theme.
 - **Colors**: NEVER use arbitrary hex codes (e.g. `#FFFFFF`, `#000000`) or generic colors (`red-500`, `blue-500`) unless specifically requested.
 - **Use Semantic Classes**:
@@ -53,13 +66,15 @@ You must maintain visual consistency using Tailwind CSS variables defined in the
 - **Spacing**: Use standard Tailwind spacing (p-4, gap-4, m-2).
 - **Typography**: Use `text-sm`, `text-lg`, `font-bold`, `font-medium`.
 
-### 4. Process
+### 5. Process
 1.  **Analyze**: Understand the requirements.
 2.  **Validation**: Check if you have enough info. If not, ask.
 3.  **Plan Generation**: Output the JSON plan.
 
-### 5. JSON Output Format
+### 6. JSON Output Format
 Return ONLY valid JSON.
+
+**CRITICAL: Every import in dependencies MUST have both "name" AND "description" fields. This is required by the schema.**
 
 ```json
 {
@@ -70,28 +85,55 @@ Return ONLY valid JSON.
   "files": [
     {
       "path": "src/components",
-      "filename": "UserProfile.tsx",
+      "filename": "Navbar.tsx",
       "functions": [
-        {"name": "UserProfile", "description": "Displays user info card"}
+        {"name": "Navbar", "description": "Main navigation bar"}
       ],
       "dependencies": [
         {
-          "from_path": "@/components/ui/card",
+          "from_path": "react-router-dom",
           "imports": [
-            {"name": "Card", "description": "Container"},
-            {"name": "CardHeader", "description": "Header"}
+            {"name": "Link", "description": "Navigation link component"}
           ]
         },
         {
           "from_path": "@/components/ui/button",
-          "imports": [{"name": "Button", "description": "Edit action"}]
-        },
-        {
-          "from_path": "lucide-react",
-          "imports": [{"name": "User", "description": "Icon"}]
+          "imports": [
+            {"name": "Button", "description": "Styled button component for navigation"}
+          ]
         }
       ],
-      "props": "interface UserProfileProps { name: string; email: string; }"
+      "props": "interface NavbarProps {}"
+    },
+    {
+      "path": "src",
+      "filename": "App.tsx",
+      "functions": [
+        {"name": "App", "description": "Main app entry with routing"}
+      ],
+      "dependencies": [
+         {
+           "from_path": "react-router-dom",
+           "imports": [
+             {"name": "BrowserRouter", "description": "Router provider component"},
+             {"name": "Routes", "description": "Container for route definitions"},
+             {"name": "Route", "description": "Individual route definition"}
+           ]
+         },
+         {
+           "from_path": "./components/Navbar",
+           "imports": [
+             {"name": "Navbar", "description": "Navigation bar component"}
+           ]
+         },
+         {
+           "from_path": "./pages/Home",
+           "imports": [
+             {"name": "Home", "description": "Home page component"}
+           ]
+         }
+      ],
+      "props": ""
     }
   ]
 }

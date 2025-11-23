@@ -8,12 +8,12 @@ class Settings:
     API_V1_STR: str = "/api/v1"
 
     # Model configurations
-    ORCHESTRATOR_MODEL: str = os.getenv("ORCHESTRATOR_MODEL", "gpt-4")
-    JUNIOR_DEV_MODEL: str = os.getenv("JUNIOR_DEV_MODEL", "gpt-3.5-turbo")
+    ORCHESTRATOR_MODEL: str = os.getenv("ORCHESTRATOR_MODEL", "gemini-2.5-flash")
+    JUNIOR_DEV_MODEL: str = os.getenv("JUNIOR_DEV_MODEL", "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8")
 
     # Base URLs for API endpoints
-    ORCHESTRATOR_BASE_URL: str = os.getenv("ORCHESTRATOR_BASE_URL", "https://api.openai.com/v1")
-    JUNIOR_DEV_BASE_URL: str = os.getenv("JUNIOR_DEV_BASE_URL", "https://api.openai.com/v1")
+    ORCHESTRATOR_BASE_URL: str = os.getenv("ORCHESTRATOR_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+    JUNIOR_DEV_BASE_URL: str = os.getenv("JUNIOR_DEV_BASE_URL", "https://api.together.xyz/v1")
 
     # API Keys from environment
     TOGETHER_API_KEY: str = os.getenv("TOGETHER_API_KEY", "")

@@ -43,6 +43,36 @@ Your responsibilities:
 """
 
 
+def clean_code_output(code: str) -> str:
+    """
+    Remove markdown code block tags from the generated code.
+    
+    Args:
+        code: The code string potentially wrapped in markdown tags
+        
+    Returns:
+        Clean code without markdown wrappers
+    """
+    code = code.strip()
+    
+    # Remove opening code fence with optional language tag
+    # Matches: ```tsx, ```typescript, ```javascript, ```jsx, ```ts, ```js, or just ```
+    if code.startswith("```"):
+        # Find the end of the first line (the opening fence)
+        first_newline = code.find("\n")
+        if first_newline != -1:
+            code = code[first_newline + 1:]
+    
+    # Remove closing code fence
+    if code.endswith("```"):
+        # Find the last occurrence of ```
+        last_fence = code.rfind("```")
+        if last_fence != -1:
+            code = code[:last_fence]
+    
+    return code.strip()
+
+
 async def implement_component(
     file_plan: FilePlan, 
     global_style: Optional[Dict[str, Any]] = None,
@@ -90,7 +120,7 @@ async def implement_component(
             model=settings.JUNIOR_DEV_MODEL,
             messages=messages,
             temperature=0.3,  # Lower temperature for more consistent code generation
-            max_tokens=3000
+            max_tokens=30000
         )
         
         print(f"DEBUG: API response received for {file_plan.filename}")
@@ -116,6 +146,10 @@ async def implement_component(
         implementation_code = message_content.strip()
         print(f"DEBUG: Implementation code received ({len(implementation_code)} chars): {implementation_code[:100]}...")
         
+        # Clean markdown code blocks if present
+        cleaned_code = clean_code_output(implementation_code)
+        print(f"DEBUG: Code cleaned, length: {len(cleaned_code)} chars")
+        
         # Update chat history
         junior_sessions[session_id].append({"role": "user", "content": implementation_request})
         junior_sessions[session_id].append({"role": "assistant", "content": implementation_code})
@@ -123,7 +157,7 @@ async def implement_component(
         return {
             "type": "implementation",
             "filename": file_plan.filename,
-            "content": implementation_code,
+            "content": cleaned_code,
             "session_id": session_id
         }
 
@@ -171,8 +205,8 @@ def _prepare_implementation_request(
             "**Dependencies:**"
         ])
         for dep in file_plan.dependencies:
-            imports_str = ", ".join(dep.imports)
-            request_parts.append(f"- Import {imports_str} from {dep.filename}")
+            imports_str = ", ".join([imp.name for imp in dep.imports])
+            request_parts.append(f"- Import {imports_str} from {dep.from_path}")
     
     if global_style:
         request_parts.extend([
