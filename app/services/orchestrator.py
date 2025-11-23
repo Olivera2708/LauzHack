@@ -28,7 +28,7 @@ The project relies on a specific file structure. You MUST follow this exactly.
 - **Entry Point**: `src/App.tsx` MUST be the main entry point, defining routes and layout.
 
 ### 2. CRITICAL: Pre-Installed Components (DO NOT CREATE THESE)
-The following components exist. You MUST import them from the correct path, none of the other components in this path @/components/ui exists:
+The following components exist. You MUST import them from the correct path, none of the other components exist in ui folder:
 - `@/components/ui/accordion`: `Accordion`, `AccordionItem`, `AccordionTrigger`, `AccordionContent`
 - `@/components/ui/avatar`: `Avatar`, `AvatarImage`, `AvatarFallback`
 - `@/components/ui/badge`: `Badge`
