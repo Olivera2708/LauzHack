@@ -272,7 +272,9 @@ async def process_instructions(request: Request):
         loop = asyncio.get_event_loop()
         
         # Create a ThreadPoolExecutor for true parallel execution
-        global_style_dict = plan.global_style.dict() if plan.global_style else None
+        global_style_dict = (
+            plan.global_style.model_dump() if plan.global_style else None
+        )
         with ThreadPoolExecutor(max_workers=len(file_plans_with_sessions)) as executor:
             # Run each blocking API call in a separate thread
             implementation_tasks = [

@@ -260,8 +260,8 @@ async def implement_component(
         response = client.chat.completions.create(
             model=settings.JUNIOR_DEV_MODEL,
             messages=messages,
-            temperature=0.0,  # Lower temperature for more consistent code generation
-            max_tokens=30000    
+            temperature=0.3,  # Slight variability while keeping outputs stable
+            max_tokens=30000
         )
         
         print(f"DEBUG: API response received for {file_plan.filename}")
@@ -331,6 +331,7 @@ def _prepare_implementation_request(
         f"Implement the React component: {file_plan.filename}",
         "",
         "**Component Specifications:**",
+        f"- Target Directory: {file_plan.path}",
         f"- Filename: {file_plan.filename}",
         f"- Props Interface: {file_plan.props}",
         "",
@@ -352,15 +353,16 @@ def _prepare_implementation_request(
     if file_plan.routes:
         request_parts.extend([
             "",
-            "**CRITICAL: Routes (MUST USE EXACTLY AS SPECIFIED):**"
+            "**Routes to Implement (paths must match exactly):**"
         ])
         for route in file_plan.routes:
-            request_parts.append(f"- Route path: '{route.name}' -> Component: '{route.component}'")
-        request_parts.append("")
-        request_parts.append("**IMPORTANT**: You MUST use these exact route paths in your implementation:")
-        request_parts.append("- For Navbar/Link components: Use the exact path in the 'to' prop (e.g., `<Link to=\"/home\">`)")
-        request_parts.append("- For App.tsx/Route components: Use the exact path in the 'path' prop (e.g., `<Route path=\"/home\" element={<Home />} />`)")
-        request_parts.append("- DO NOT modify, add, remove, or change these routes. Use them exactly as specified.")
+            request_parts.append(f"- Path: {route.name} -> Component: {route.component}")
+
+        filename_lower = file_plan.filename.lower()
+        if "app.tsx" in filename_lower or "router" in filename_lower:
+            request_parts.append("- Wrap content with <BrowserRouter> once and render <Routes> with the mappings above.")
+        if "navbar" in filename_lower:
+            request_parts.append("- Render Link/NavLink elements using the routes above; keep `to` values identical to the paths.")
     
     if global_style:
         request_parts.extend([

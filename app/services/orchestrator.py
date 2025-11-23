@@ -294,6 +294,7 @@ async def process_chat(instructions: str, session_id: str = None, images: Option
 
     if not session_id:
         session_id = str(uuid.uuid4())
+    if session_id not in chat_sessions:
         chat_sessions[session_id] = []
 
     history = chat_sessions.get(session_id, [])
@@ -346,7 +347,7 @@ async def process_chat(instructions: str, session_id: str = None, images: Option
         response = client.chat.completions.create(
             model=settings.ORCHESTRATOR_MODEL,
             messages=messages,
-            temperature=0.0,
+            temperature=0.3,
             max_tokens=30000
         )
         
