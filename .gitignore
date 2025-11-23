@@ -1,4 +1,8 @@
-# Local Netlify folder
-.netlify
-/backend_deploy/venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
 .DS_Store
