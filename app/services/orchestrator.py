@@ -71,6 +71,7 @@ Always import them with `@/components/ui/<kebab-name>`, e.g. `import { Button } 
 - Call out any shared layout components (hero, sidebar, cards) and where they live.
 - Make the router responsibilities explicit for `App.tsx` and `Navbar.tsx` so juniors cannot mis-wire links.
 - Use default imports for local files in dependencies (e.g., `"from_path": "./components/Navbar"`).
+- Assume juniors may return blocking feedback. Provide enough clarity to avoid it; if new components are needed later, re-plan with precise paths and props.
 
 ## 6) Example Plan (high quality)
 ```json

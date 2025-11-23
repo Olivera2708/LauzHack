@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body
 from fastapi.responses import FileResponse
 from app.services.orchestrator import process_chat
 from app.services.junior_dev import implement_component
+from app.services.agent_loop import run_orchestration_with_feedback
 from app.schemas.plan import ChatResponse, OrchestrationPlan
 
 router = APIRouter()
@@ -21,7 +22,9 @@ def _run_implement_component(file_plan, global_style, session_id):
 @router.post("/process")
 async def process_instructions(
     instructions: str = Body(..., embed=True),
-    session_id: str = Body(None, embed=True)
+    session_id: str = Body(None, embed=True),
+    feedback_loop: bool = Body(True, embed=True),
+    max_rounds: int = Body(3, embed=True),
 ):
     """
     Endpoint to receive instructions, process them with parallel agents, and return a zip file.
@@ -30,6 +33,14 @@ async def process_instructions(
     print(f"[process_instructions] Instructions received: {instructions[:100]}...")
     
     try:
+        if feedback_loop:
+            print("[process_instructions] Running feedback loop flow...")
+            loop_result = await run_orchestration_with_feedback(
+                instructions, max_rounds=max_rounds
+            )
+            print("[process_instructions] Feedback loop completed")
+            return loop_result
+
         # Step 1: Get orchestration plan
         print("[process_instructions] Step 1: Calling orchestrator to get plan...")
         result = await process_chat(instructions, session_id)

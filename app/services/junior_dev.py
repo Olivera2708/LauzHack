@@ -18,9 +18,9 @@ client = openai.OpenAI(
 ) if junior_dev_api_key else None
 
 JUNIOR_DEV_SYSTEM_PROMPT = """
-**Role:** You are a Strict React/TypeScript Component Generator. You function as a deterministic code engine. Your goal is to translate technical specifications from an "Orchestrator" into error-free, production-ready React code.
+**Role:** You are a Strict React/TypeScript Component Generator that can also raise concise feedback if implementation is blocked. You translate technical specs from an "Orchestrator" into production-ready React code.
 
-**Primary Directive:** Follow the specifications exactly. Do not improvise styling or logic unless explicitly told to. Do not output conversational text. Output **only** the code file within a markdown block.
+**Primary Directive:** Prefer delivering code. Only send feedback when you cannot implement with the provided information. Keep responses deterministic and structured.
 
 ## 1) Global Constraints & Tech Stack
 - Framework: React (functional components only).
@@ -29,12 +29,12 @@ JUNIOR_DEV_SYSTEM_PROMPT = """
 - Icons: `lucide-react` (default) or as provided in dependencies.
 - Strictness: Never use `any`; always type props.
 
-## 2) Router-Specific Guidance (make this foolproof)
+## 2) Router-Specific Guidance (foolproof)
 - If dependencies include `react-router-dom`, honor them exactly. Do not introduce other routers.
 - Only wrap the app in `BrowserRouter` when building the root file (usually `App.tsx`). Do not nest routers inside child components.
 - When a `routes` array is provided:
   - Router files must map each route to `<Route path="<name>" element={<Component />} />` using the exact path strings.
-  - Navigation files must render `<Link>`/`<NavLink>` with `to` set to the same path strings.
+  - Navigation files must render `<Link>`/`<NavLink>` with `to` matching those path strings.
   - Always include the root path `/` exactly as provided.
 - Use `Outlet`, `Navigate`, or nested `Routes` only if specified in dependencies.
 - Local components must be default exports/imports. Third-party and shadcn/ui imports are named.
@@ -56,7 +56,8 @@ JUNIOR_DEV_SYSTEM_PROMPT = """
    - Prefer semantic elements. Add `aria-*` labels for interactive controls when unclear.
    - Escape text for `<` and `>` characters using `{'<'} / {'>'}` or entities.
 6. **Output Format**
-   - Start with imports and end after exporting the component. No explanations outside the code fence.
+   - Preferred: return code in a markdown fence or raw TypeScript.
+   - If blocked, return JSON: {"type":"feedback","blocking":true|false,"message":"<short reason>","filename":"<file>"}.
 
 ## 4) Pre-Installed UI Components. Only these are available from `@/components/ui/`:
 - `@/components/ui/accordion`: Accordion, AccordionItem, AccordionTrigger, AccordionContent
@@ -205,6 +206,11 @@ const App: React.FC = () => {
 
 export default App;
 ```
+
+### Example Feedback (when blocked)
+```json
+{"type":"feedback","blocking":true,"message":"Need API response shape for stats grid","filename":"StatsGrid.tsx"}
+```
 """
 
 
@@ -237,6 +243,28 @@ def clean_code_output(code: str) -> str:
             code = code[:last_fence]
     
     return code.strip()
+
+
+def _parse_feedback_or_code(raw: str) -> Dict[str, Any]:
+    """
+    Parse a junior response that could be code or a feedback JSON payload.
+    """
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        fence_end = cleaned.find("\n")
+        if fence_end != -1:
+            cleaned = cleaned[fence_end + 1 :]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[: cleaned.rfind("```")].strip()
+
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict) and "type" in parsed:
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    return {"type": "implementation", "code": clean_code_output(raw)}
 
 
 async def implement_component(
@@ -312,20 +340,31 @@ async def implement_component(
         implementation_code = message_content.strip()
         print(f"DEBUG: Implementation code received ({len(implementation_code)} chars): {implementation_code[:100]}...")
         
-        # Clean markdown code blocks if present
-        cleaned_code = clean_code_output(implementation_code)
-        print(f"DEBUG: Code cleaned, length: {len(cleaned_code)} chars")
+        parsed = _parse_feedback_or_code(implementation_code)
+        if parsed.get("type") == "feedback":
+            result_payload = {
+                "type": "feedback",
+                "filename": file_plan.filename,
+                "message": parsed.get("message", ""),
+                "blocking": bool(parsed.get("blocking", False)),
+                "session_id": session_id,
+            }
+            print(f"DEBUG: Feedback parsed for {file_plan.filename}: {result_payload}")
+        else:
+            cleaned_code = parsed.get("code", clean_code_output(implementation_code))
+            print(f"DEBUG: Code cleaned, length: {len(cleaned_code)} chars")
+            result_payload = {
+                "type": "implementation",
+                "filename": file_plan.filename,
+                "content": cleaned_code,
+                "session_id": session_id
+            }
         
         # Update chat history
         junior_sessions[session_id].append({"role": "user", "content": implementation_request})
         junior_sessions[session_id].append({"role": "assistant", "content": implementation_code})
         
-        return {
-            "type": "implementation",
-            "filename": file_plan.filename,
-            "content": cleaned_code,
-            "session_id": session_id
-        }
+        return result_payload
 
     except Exception as e:
         print(f"DEBUG: Exception in junior_dev API call: {e}")
