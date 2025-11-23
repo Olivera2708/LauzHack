@@ -127,6 +127,7 @@ async def run_orchestration_with_feedback(
     instructions: str,
     max_rounds: int = 3,
     orchestrator_session: Optional[str] = None,
+    images: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """
     Alternate between orchestrator planning and junior implementation with feedback and build verification.
@@ -140,7 +141,9 @@ async def run_orchestration_with_feedback(
     junior_session_map: Dict[str, str] = {}
 
     for round_index in range(max_rounds):
-        plan_result = await orchestrator.process_chat(current_instructions, session_id=orch_session)
+        plan_result = await orchestrator.process_chat(
+            current_instructions, session_id=orch_session, images=images
+        )
         if plan_result.get("type") != "plan":
             return {
                 "type": "error",

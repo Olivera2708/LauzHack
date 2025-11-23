@@ -128,6 +128,144 @@ async def build_and_start(project_path: str) -> str:
 
     raise Exception("Could not detect local development URL.")
 
+
+async def _write_plan_to_zip(plan: OrchestrationPlan, implementations: List[dict], session_id: str) -> FileResponse:
+    """
+    Copy the frontend template, write implementations, optionally build, and return a zip file.
+    """
+    print("[process_instructions] Step 4: Preparing build workspace...")
+    template_source = Path(__file__).resolve().parent.parent.parent.parent / "frontend_template"
+    build_root = Path(__file__).resolve().parent.parent.parent.parent / "persistent_builds"
+    build_root.mkdir(parents=True, exist_ok=True)
+    build_dir = build_root / f"build_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    template_dest = build_dir / "template"
+    print(f"[process_instructions] Template source: {template_source}")
+    print(f"[process_instructions] Template destination: {template_dest}")
+
+    if not template_source.exists():
+        raise FileNotFoundError(f"Template source not found at {template_source}")
+
+    print("[process_instructions] Copying template directory...")
+    template_dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        template_source,
+        template_dest,
+        ignore=shutil.ignore_patterns('node_modules', '__pycache__', '*.pyc', '.git')
+    )
+    print(f"[process_instructions] Template copied successfully to {template_dest}")
+
+    print("[process_instructions] Step 5: Processing agent implementations...")
+    errors = []
+    successful_files = []
+
+    for idx, impl_result in enumerate(implementations):
+        print(f"[process_instructions] Processing implementation {idx+1}/{len(implementations)}")
+
+        if isinstance(impl_result, Exception):
+            errors.append({
+                "filename": plan.files[idx].filename if idx < len(plan.files) else "unknown",
+                "error": str(impl_result)
+            })
+            continue
+
+        result_type = impl_result.get("type")
+        if result_type == "error":
+            errors.append({
+                "filename": impl_result.get("filename", "unknown"),
+                "error": impl_result.get("content", "Unknown error")
+            })
+            continue
+        if result_type == "feedback":
+            errors.append({
+                "filename": impl_result.get("filename", "unknown"),
+                "error": impl_result.get("message", "Feedback returned instead of implementation"),
+                "blocking": bool(impl_result.get("blocking", False)),
+            })
+            continue
+        if result_type != "implementation":
+            errors.append({
+                "filename": impl_result.get("filename", "unknown"),
+                "error": f"Unsupported result type: {result_type}"
+            })
+            continue
+
+        filename = impl_result.get("filename")
+        content = impl_result.get("content", "")
+        print(f"[process_instructions]   Processing file: {filename} ({len(content)} chars)")
+
+        if not filename:
+            errors.append({
+                "filename": "unknown",
+                "error": "No filename in implementation result"
+            })
+            continue
+
+        file_plan = next((fp for fp in plan.files if fp.filename == filename), None)
+        if not file_plan:
+            errors.append({
+                "filename": filename,
+                "error": "File plan not found"
+            })
+            continue
+
+        file_path = template_dest / file_plan.path / filename
+        print(f"[process_instructions]   Writing file to: {file_path}")
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            file_path.write_text(content, encoding='utf-8')
+            successful_files.append(filename)
+            print(f"[process_instructions]   ✓ Successfully wrote {filename}")
+        except Exception as e:
+            print(f"[process_instructions]   ✗ Failed to write {filename}: {str(e)}")
+            errors.append({
+                "filename": filename,
+                "error": f"Failed to write file: {str(e)}"
+            })
+
+    local_url = None
+    print("🏗️ Starting build and start process...")
+    try:
+        local_url = await build_and_start(str(template_dest))
+        print(f"✅ Local URL obtained: {local_url}")
+    except Exception as e:
+        print(f"❌ Build and start failed: {e}")
+
+    print(f"[process_instructions] File writing completed - {len(successful_files)} successful, {len(errors)} errors")
+
+    print("[process_instructions] Step 6: Creating zip file...")
+    zip_path = build_dir / "template.zip"
+    print(f"[process_instructions] Zip file path: {zip_path}")
+
+    file_count = 0
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, dirs, files in os.walk(template_dest):
+            dirs[:] = [d for d in dirs if d not in ['node_modules', '__pycache__', '.git']]
+            for file in files:
+                file_path = Path(root) / file
+                arcname = file_path.relative_to(template_dest)
+                zipf.write(file_path, arcname)
+                file_count += 1
+                if file_count % 10 == 0:
+                    print(f"[process_instructions]   Added {file_count} files to zip...")
+
+    print(f"[process_instructions] Zip file created with {file_count} files")
+
+    print("[process_instructions] Step 7: Preparing zip file response...")
+    print(f"[process_instructions] Zip file ready at: {zip_path}")
+    print(f"[process_instructions] Returning FileResponse - {len(successful_files)} successful, {len(errors)} errors")
+
+    return FileResponse(
+        path=str(zip_path),
+        filename="template.zip",
+        media_type="application/zip",
+        headers={
+            "X-Successful-Files": str(len(successful_files)),
+            "X-Failed-Files": str(len(errors)),
+            "X-Documentation-URL": local_url or ""
+        }
+    )
+
 @router.post("/process")
 async def process_instructions(request: Request):
     """
@@ -147,7 +285,7 @@ async def process_instructions(request: Request):
     image_data_list = []
     instructions = None
     session_id = None
-    feedback_loop = False
+    feedback_loop = True
     max_rounds = 3
     
     if "multipart/form-data" in content_type:
@@ -247,18 +385,32 @@ async def process_instructions(request: Request):
     print(f"[process_instructions] Starting - session_id: {session_id}")
     print(f"[process_instructions] Instructions received: {instructions[:100]}...")
 
-    if feedback_loop and image_data_list:
-        print("[process_instructions] Feedback loop disabled because images were provided; falling back to single-pass flow.")
-        feedback_loop = False
-    
     try:
         if feedback_loop:
             print("[process_instructions] Running feedback loop flow...")
             loop_result = await run_orchestration_with_feedback(
-                instructions, max_rounds=max_rounds
+                instructions,
+                max_rounds=max_rounds,
+                orchestrator_session=session_id,
+                images=image_data_list if image_data_list else None,
             )
             print("[process_instructions] Feedback loop completed")
-            return loop_result
+            if loop_result.get("type") != "feedback_loop":
+                return loop_result
+
+            iterations = loop_result.get("iterations") or []
+            if not iterations:
+                return loop_result
+
+            last_iteration = iterations[-1]
+            plan_data = last_iteration.get("plan")
+            impl_results = last_iteration.get("implementations", {})
+            if not plan_data:
+                return loop_result
+
+            plan = plan_data if isinstance(plan_data, OrchestrationPlan) else OrchestrationPlan(**plan_data)
+            implementations = impl_results.get("implementations", [])
+            return await _write_plan_to_zip(plan, implementations, session_id or str(uuid.uuid4()))
 
         # Step 1: Get orchestration plan (with images if provided)
         print("[process_instructions] Step 1: Calling orchestrator to get plan...")
@@ -319,144 +471,7 @@ async def process_instructions(request: Request):
             implementations = await asyncio.gather(*implementation_tasks, return_exceptions=True)
         
         print(f"[process_instructions] Parallel execution completed - {len(implementations)} results received")
-        
-        # Step 4: Prepare a persistent build directory for preview and download
-        print("[process_instructions] Step 4: Preparing build workspace...")
-        template_source = Path(__file__).resolve().parent.parent.parent.parent / "frontend_template"
-        build_root = Path(__file__).resolve().parent.parent.parent.parent / "persistent_builds"
-        build_root.mkdir(parents=True, exist_ok=True)
-        build_dir = build_root / f"build_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-        template_dest = build_dir / "template"
-        print(f"[process_instructions] Template source: {template_source}")
-        print(f"[process_instructions] Template destination: {template_dest}")
-
-        if not template_source.exists():
-            print(f"[process_instructions] ERROR: Template source not found at {template_source}")
-            return {
-                "type": "error",
-                "content": f"Template source not found at {template_source}",
-                "session_id": session_id
-            }
-
-        # Copy the entire frontend_template directory
-        print("[process_instructions] Copying template directory...")
-        template_dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(
-            template_source,
-            template_dest,
-            ignore=shutil.ignore_patterns('node_modules', '__pycache__', '*.pyc', '.git')
-        )
-        print(f"[process_instructions] Template copied successfully to {template_dest}")
-
-        # Step 5: Write new files from agent implementations
-        print("[process_instructions] Step 5: Processing agent implementations...")
-        errors = []
-        successful_files = []
-
-        for idx, impl_result in enumerate(implementations):
-            print(f"[process_instructions] Processing implementation {idx+1}/{len(implementations)}")
-
-            # Handle exceptions from gather
-            if isinstance(impl_result, Exception):
-                print(f"[process_instructions]   Exception caught: {str(impl_result)}")
-                errors.append({
-                    "filename": plan.files[idx].filename if idx < len(plan.files) else "unknown",
-                    "error": str(impl_result)
-                })
-                continue
-
-            if impl_result.get("type") == "error":
-                print(f"[process_instructions]   Error result: {impl_result.get('content', 'Unknown error')}")
-                errors.append({
-                    "filename": impl_result.get("filename", "unknown"),
-                    "error": impl_result.get("content", "Unknown error")
-                })
-                continue
-
-            filename = impl_result.get("filename")
-            content = impl_result.get("content", "")
-            print(f"[process_instructions]   Processing file: {filename} ({len(content)} chars)")
-
-            if not filename:
-                print("[process_instructions]   ERROR: No filename in result")
-                errors.append({
-                    "filename": "unknown",
-                    "error": "No filename in implementation result"
-                })
-                continue
-
-            # Find the corresponding file plan to get the path
-            file_plan = next((fp for fp in plan.files if fp.filename == filename), None)
-            if not file_plan:
-                print(f"[process_instructions]   ERROR: File plan not found for {filename}")
-                errors.append({
-                    "filename": filename,
-                    "error": "File plan not found"
-                })
-                continue
-
-            # Create the directory structure
-            file_path = template_dest / file_plan.path / filename
-            print(f"[process_instructions]   Writing file to: {file_path}")
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Write the file
-            try:
-                file_path.write_text(content, encoding='utf-8')
-                successful_files.append(filename)
-                print(f"[process_instructions]   ✓ Successfully wrote {filename}")
-            except Exception as e:
-                print(f"[process_instructions]   ✗ Failed to write {filename}: {str(e)}")
-                errors.append({
-                    "filename": filename,
-                    "error": f"Failed to write file: {str(e)}"
-                })
-
-        local_url = None
-        print("🏗️ Starting build and start process...")
-        try:
-            local_url = await build_and_start(str(template_dest))
-            print(f"✅ Local URL obtained: {local_url}")
-        except Exception as e:
-            print(f"❌ Build and start failed: {e}")
-
-        print(f"[process_instructions] File writing completed - {len(successful_files)} successful, {len(errors)} errors")
-
-        # Step 6: Create zip file
-        print("[process_instructions] Step 6: Creating zip file...")
-        zip_path = build_dir / "template.zip"
-        print(f"[process_instructions] Zip file path: {zip_path}")
-
-        file_count = 0
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk(template_dest):
-                # Skip node_modules and other unnecessary directories
-                dirs[:] = [d for d in dirs if d not in ['node_modules', '__pycache__', '.git']]
-                for file in files:
-                    file_path = Path(root) / file
-                    arcname = file_path.relative_to(template_dest)
-                    zipf.write(file_path, arcname)
-                    file_count += 1
-                    if file_count % 10 == 0:
-                        print(f"[process_instructions]   Added {file_count} files to zip...")
-
-        print(f"[process_instructions] Zip file created with {file_count} files")
-
-        # Step 7: Return the zip file
-        print("[process_instructions] Step 7: Preparing zip file response...")
-        print(f"[process_instructions] Zip file ready at: {zip_path}")
-        print(f"[process_instructions] Returning FileResponse - {len(successful_files)} successful, {len(errors)} errors")
-
-        return FileResponse(
-            path=str(zip_path),
-            filename="template.zip",
-            media_type="application/zip",
-            headers={
-                "X-Successful-Files": str(len(successful_files)),
-                "X-Failed-Files": str(len(errors)),
-                "X-Documentation-URL": local_url or ""
-            }
-        )
+        return await _write_plan_to_zip(plan, implementations, session_id or str(uuid.uuid4()))
     
     except Exception as e:
         print(f"[process_instructions] EXCEPTION: {str(e)}")
