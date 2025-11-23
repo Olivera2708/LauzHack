@@ -12,13 +12,123 @@ from fastapi import APIRouter, Body, File, UploadFile, Form, Request
 from fastapi.responses import FileResponse
 from app.services.orchestrator import process_chat
 from app.services.junior_dev import implement_component
-from app.schemas.plan import ChatResponse, OrchestrationPlan
+from app.schemas.plan import ChatResponse, OrchestrationPlan, TestRequest, TestResponse
+import asyncio
+import re
+import os
+import json
+from typing import Optional
+import time
+from fastapi import HTTPException
 
 router = APIRouter()
 
 def _run_implement_component(file_plan, global_style, session_id):
     """Helper function to run async implement_component in a thread."""
     return asyncio.run(implement_component(file_plan, global_style, session_id))
+
+# async def test_endpoint(request: TestRequest):
+#     """
+#     Test endpoint that prints received data and returns a response
+#     """
+#     print("🔵 TEST ENDPOINT CALLED!")
+#     print(f"📨 Received message: {request.message}")
+    
+#     if request.image_data:
+#         print(f"🖼️ Received image data (first 100 chars): {request.image_data[:100]}...")
+#         image_size = len(request.image_data)
+#         print(f"📊 Image data size: {image_size} characters")
+#     else:
+#         print("📭 No image data received")
+    
+#     local_url = None
+#     project_path = "../frontend"
+#     package_json_path = os.path.join(project_path, "package.json")
+#     if not os.path.exists(package_json_path):
+#         print(f"❌ package.json not found at: {package_json_path}")
+#         raise HTTPException(status_code=400, detail="Not a valid React project (package.json not found)")
+
+#     print("🏗️ Starting build and start process...")
+#     try:
+#         local_url = await build_and_start(project_path)
+#         print(f"✅ Local URL obtained: {local_url}")
+#     except Exception as e:
+#         print(f"❌ Build and start failed: {e}")
+    
+#     print("`📋 Request details logged successfully")
+    
+#     return TestResponse(
+#         success=True,
+#         message="Backend received your data successfully!" + (f" Local server started at {local_url}" if local_url else ""),
+#         received_data={
+#             "message": request.message,
+#             "has_image": bool(request.image_data),
+#             "image_size": len(request.image_data) if request.image_data else 0,
+#             "local_url": local_url
+#         },
+#         backend_timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+#         local_url=local_url
+#     )
+
+async def build_and_start(project_path: str) -> str:
+    """Build existing React project and deploy to Netlify"""
+     # 1️⃣ Install dependencies
+    print("Installing dependencies...")
+    install = await asyncio.create_subprocess_exec(
+        "npm", "install",
+        cwd=project_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    await install.wait()
+    print("✅ npm install complete")
+
+    # 2️⃣ Read package.json to determine run script
+    package_json_path = os.path.join(project_path, "package.json")
+    with open(package_json_path, "r") as f:
+        package = json.load(f)
+
+    run_script = None
+    scripts = package.get("scripts", {})
+
+    if "dev" in scripts:
+        run_script = "dev"        # Vite, Next.js, etc.
+    elif "start" in scripts:
+        run_script = "start"      # CRA, default node start
+    else:
+        raise Exception("No dev or start script found in package.json.")
+
+    print(f"Using script: npm run {run_script}")
+
+    # 3️⃣ Run local dev server
+    process = await asyncio.create_subprocess_exec(
+        "npm", "run", run_script,
+        cwd=project_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+
+    url_regex = re.compile(r"(http://localhost:\d+)")
+    url_found = None
+
+    print("Waiting for local server to start...")
+
+    # 4️⃣ Read output in real time until we detect URL
+    while True:
+        line = await process.stdout.readline()
+        if not line:
+            break
+
+        decoded = line.decode("utf-8").strip()
+        print(decoded)
+
+        match = url_regex.search(decoded)
+        if match:
+            url_found = match.group(1)
+            print(f"🎉 Found local URL: {url_found}")
+            return url_found  # return immediately
+
+    raise Exception("Could not detect local development URL.")
 
 @router.post("/process")
 async def process_instructions(request: Request):
@@ -179,12 +289,13 @@ async def process_instructions(request: Request):
                     "content": f"Template source not found at {template_source}",
                     "session_id": session_id
                 }
+            persistent_build_dir = Path("persistent_builds") / f"build_{int(time.time())}"
+            persistent_build_dir.mkdir(parents=True, exist_ok=True)
             
             # Copy the entire frontend_template directory
             print("[process_instructions] Copying template directory...")
             shutil.copytree(
-                template_source, 
-                template_dest, 
+                template_dest, persistent_build_dir / "template",
                 ignore=shutil.ignore_patterns('node_modules', '__pycache__', '*.pyc', '.git')
             )
             print(f"[process_instructions] Template copied successfully to {template_dest}")
@@ -252,6 +363,14 @@ async def process_instructions(request: Request):
                         "filename": filename,
                         "error": f"Failed to write file: {str(e)}"
                     })
+            local_url = None
+            print("🏗️ Starting build and start process...")
+            try:
+                local_url = await build_and_start(template_dest)
+
+                print(f"✅ Local URL obtained: {local_url}")
+            except Exception as e:
+                print(f"❌ Build and start failed: {e}")
             
             print(f"[process_instructions] File writing completed - {len(successful_files)} successful, {len(errors)} errors")
             
@@ -292,7 +411,8 @@ async def process_instructions(request: Request):
                 media_type="application/zip",
                 headers={
                     "X-Successful-Files": str(len(successful_files)),
-                    "X-Failed-Files": str(len(errors))
+                    "X-Failed-Files": str(len(errors)),
+                    "X-Documentation-URL": local_url
                 }
             )
     

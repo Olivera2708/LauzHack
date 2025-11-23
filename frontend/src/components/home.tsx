@@ -1,5 +1,5 @@
 import React, {useState, useRef, useEffect, type KeyboardEvent, type JSX} from 'react';
-import { Send, User, Bot, Sun, Moon, Trash2, Copy, Check, Code, Image, X } from 'lucide-react';
+import {Send, User, Bot, Sun, Moon, Trash2, Copy, Check, Code, Image, X} from 'lucide-react';
 import type {Message} from '../types/types.ts';
 import CodePreview from './codePreview.tsx';
 
@@ -36,7 +36,7 @@ const Home: React.FC = () => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     const scrollToBottom = (): void => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
     };
 
     useEffect(() => {
@@ -61,39 +61,39 @@ const Home: React.FC = () => {
         try {
             setIsLoading(true);
 
-            const response = await fetch('http://localhost:8000/test', {
+            const response = await fetch('http://localhost:8000/api/v1/instructions/process', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    message: input,
-                    image_data: selectedImage ? imagePreview : null,
-                    project_path: "../frontend"  // Add the project path here
+                    instructions: input,
+                    images: [selectedImage] ? [imagePreview] : null,
                 })
             });
 
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
+            const documentationUrl = response.headers.get('X-Documentation-URL');
+            setPreviewCode(documentationUrl);
+            const blob = await response.blob();
 
-            const data = await response.json();
-            console.log('✅ Backend response:', data);
+            // Create download link
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'template.zip'; // This will use the filename from Content-Disposition header
+            document.body.appendChild(a);
+            a.click();
 
-            // Create AI response based on backend reply
-            let aiContent = `Backend says: "${data.message}"\n\n`;
-            aiContent += `Received at: ${data.backend_timestamp}\n\n`;
-            aiContent += `Data: ${JSON.stringify(data.received_data, null, 2)}`;
-
-            // Add local URL to the message if available
-            if (data.local_url) {
-                aiContent += `\n\n🌐 **Local Server Started**: ${data.local_url}`;
-                setPreviewCode(data.local_url);
-            }
+            // Clean up
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
 
             const aiMessage: Message = {
                 id: (Date.now() + 1).toString(),
-                content: aiContent,
+                content: "Generated code",
                 role: 'assistant',
                 timestamp: new Date()
             };
@@ -161,7 +161,7 @@ const Home: React.FC = () => {
                                         onClick={() => copyToClipboard(codeContent, `code-${index}`)}
                                         className="text-gray-300 hover:text-white transition-colors"
                                     >
-                                        {copiedId === `code-${index}` ? <Check size={14} /> : <Copy size={14} />}
+                                        {copiedId === `code-${index}` ? <Check size={14}/> : <Copy size={14}/>}
                                     </button>
                                 </div>
                                 <pre className="bg-gray-900 p-4 rounded-b-lg overflow-x-auto text-sm">
@@ -200,7 +200,7 @@ const Home: React.FC = () => {
                         <div className={`p-2 rounded-lg ${
                             darkMode ? 'bg-blue-600' : 'bg-blue-500'
                         }`}>
-                            <Bot size={24} className="text-white" />
+                            <Bot size={24} className="text-white"/>
                         </div>
                         <div>
                             <h1 className="text-xl font-bold">AI Chat</h1>
@@ -222,7 +222,7 @@ const Home: React.FC = () => {
                             } ${showCodePreview ? (darkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white') : ''}`}
                             title="Toggle code preview"
                         >
-                            <Code size={20} />
+                            <Code size={20}/>
                         </button>
 
                         <button
@@ -234,7 +234,7 @@ const Home: React.FC = () => {
                             }`}
                             title="Clear chat"
                         >
-                            <Trash2 size={20} />
+                            <Trash2 size={20}/>
                         </button>
 
                         <button
@@ -246,7 +246,7 @@ const Home: React.FC = () => {
                             }`}
                             title="Toggle theme"
                         >
-                            {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+                            {darkMode ? <Sun size={20}/> : <Moon size={20}/>}
                         </button>
                     </div>
                 </div>
@@ -262,7 +262,7 @@ const Home: React.FC = () => {
                                 <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full mb-4 ${
                                     darkMode ? 'bg-gray-800' : 'bg-gray-100'
                                 }`}>
-                                    <Bot size={32} className={darkMode ? 'text-blue-400' : 'text-blue-500'} />
+                                    <Bot size={32} className={darkMode ? 'text-blue-400' : 'text-blue-500'}/>
                                 </div>
                                 <h2 className={`text-2xl font-bold mb-2 ${
                                     darkMode ? 'text-white' : 'text-gray-900'
@@ -282,15 +282,16 @@ const Home: React.FC = () => {
                                             message.role === 'user' ? 'flex-row-reverse' : 'flex-row'
                                         }`}
                                     >
-                                        <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                                            message.role === 'user'
-                                                ? (darkMode ? 'bg-blue-600' : 'bg-blue-500')
-                                                : (darkMode ? 'bg-gray-700' : 'bg-gray-300')
-                                        }`}>
+                                        <div
+                                            className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+                                                message.role === 'user'
+                                                    ? (darkMode ? 'bg-blue-600' : 'bg-blue-500')
+                                                    : (darkMode ? 'bg-gray-700' : 'bg-gray-300')
+                                            }`}>
                                             {message.role === 'user' ? (
-                                                <User size={16} className="text-white" />
+                                                <User size={16} className="text-white"/>
                                             ) : (
-                                                <Bot size={16} className="text-white" />
+                                                <Bot size={16} className="text-white"/>
                                             )}
                                         </div>
 
@@ -330,21 +331,23 @@ const Home: React.FC = () => {
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                                             darkMode ? 'bg-gray-700' : 'bg-gray-300'
                                         }`}>
-                                            <Bot size={16} className="text-white" />
+                                            <Bot size={16} className="text-white"/>
                                         </div>
                                         <div className={`px-4 py-3 rounded-2xl ${
                                             darkMode ? 'bg-gray-800' : 'bg-white border border-gray-200'
                                         }`}>
                                             <div className="flex space-x-2">
                                                 <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce"></div>
-                                                <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                                                <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                                                <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce"
+                                                     style={{animationDelay: '0.2s'}}></div>
+                                                <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce"
+                                                     style={{animationDelay: '0.4s'}}></div>
                                             </div>
                                         </div>
                                     </div>
                                 )}
 
-                                <div ref={messagesEndRef} />
+                                <div ref={messagesEndRef}/>
                             </div>
                         )}
                     </main>
@@ -367,7 +370,7 @@ const Home: React.FC = () => {
                                         onClick={removeImage}
                                         className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1"
                                     >
-                                        <X size={14} />
+                                        <X size={14}/>
                                     </button>
                                 </div>
                             )}
@@ -387,12 +390,13 @@ const Home: React.FC = () => {
                     darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'
                 }`}
                 rows={1}
-                style={{ minHeight: '56px', maxHeight: '200px' }}
+                style={{minHeight: '56px', maxHeight: '200px'}}
             />
 
                                 {/* Image Upload Button */}
-                                <label className="absolute right-12 bottom-2 p-2 rounded-lg transition-colors cursor-pointer bg-gray-600 hover:bg-gray-700 text-white">
-                                    <Image size={16} />
+                                <label
+                                    className="absolute right-12 bottom-2 p-2 rounded-lg transition-colors cursor-pointer bg-gray-600 hover:bg-gray-700 text-white">
+                                    <Image size={16}/>
                                     <input
                                         type="file"
                                         accept="image/*"
@@ -411,7 +415,7 @@ const Home: React.FC = () => {
                                             : (darkMode ? 'bg-gray-700 text-gray-500' : 'bg-gray-300 text-gray-400')
                                     }`}
                                 >
-                                    <Send size={16} />
+                                    <Send size={16}/>
                                 </button>
                             </div>
 
@@ -428,7 +432,7 @@ const Home: React.FC = () => {
                 {showCodePreview && (
                     <div className="w-1/2 border-l border-gray-700 p-4">
                         {/* Pass the extracted code to CodePreview */}
-                        <CodePreview initialCode={previewCode} />
+                        <CodePreview initialCode={previewCode}/>
                     </div>
                 )}
             </div>

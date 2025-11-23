@@ -33,3 +33,15 @@ class ChatResponse(BaseModel):
     type: str = Field(..., description="'question', 'plan' or 'error'")
     content: Union[str, OrchestrationPlan]
     session_id: str
+
+
+class TestRequest(BaseModel):
+    message: str
+    image_data: Optional[str] = None
+
+class TestResponse(BaseModel):
+    success: bool
+    message: str
+    received_data: dict
+    backend_timestamp: str
+    local_url: Optional[str] = None 
