@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 from app.schemas.plan import OrchestrationPlan
 from app.services.junior_dev import implement_component
 from app.services.orchestrator import process_chat
+from app.services.agent_loop import run_orchestration_with_feedback
 
 router = APIRouter()
 
@@ -146,6 +147,8 @@ async def process_instructions(request: Request):
     image_data_list = []
     instructions = None
     session_id = None
+    feedback_loop = False
+    max_rounds = 3
     
     if "multipart/form-data" in content_type:
         # Parse form data manually for multipart requests
@@ -170,6 +173,15 @@ async def process_instructions(request: Request):
             }
         instructions = form.get("instructions", "")
         session_id = form.get("session_id")
+        feedback_value = form.get("feedback_loop", feedback_loop)
+        if isinstance(feedback_value, str):
+            feedback_loop = feedback_value.lower() in ("1", "true", "yes", "on")
+        else:
+            feedback_loop = bool(feedback_value)
+        try:
+            max_rounds = int(form.get("max_rounds", max_rounds))
+        except (TypeError, ValueError):
+            max_rounds = max_rounds
         
         # Handle images from form data
         image_files = form.getlist("images")
@@ -211,6 +223,11 @@ async def process_instructions(request: Request):
             body = await request.json()
             instructions = body.get("instructions", "")
             session_id = body.get("session_id")
+            feedback_loop = bool(body.get("feedback_loop", feedback_loop))
+            try:
+                max_rounds = int(body.get("max_rounds", max_rounds))
+            except (TypeError, ValueError):
+                max_rounds = max_rounds
         except Exception as e:
             print(f"[process_instructions] Error parsing JSON body: {str(e)}")
             return {
@@ -229,8 +246,20 @@ async def process_instructions(request: Request):
     
     print(f"[process_instructions] Starting - session_id: {session_id}")
     print(f"[process_instructions] Instructions received: {instructions[:100]}...")
+
+    if feedback_loop and image_data_list:
+        print("[process_instructions] Feedback loop disabled because images were provided; falling back to single-pass flow.")
+        feedback_loop = False
     
     try:
+        if feedback_loop:
+            print("[process_instructions] Running feedback loop flow...")
+            loop_result = await run_orchestration_with_feedback(
+                instructions, max_rounds=max_rounds
+            )
+            print("[process_instructions] Feedback loop completed")
+            return loop_result
+
         # Step 1: Get orchestration plan (with images if provided)
         print("[process_instructions] Step 1: Calling orchestrator to get plan...")
         result = await process_chat(instructions, session_id, images=image_data_list if image_data_list else None)
@@ -438,4 +467,3 @@ async def process_instructions(request: Request):
             "content": f"Unexpected error: {str(e)}",
             "session_id": session_id
         }
-
