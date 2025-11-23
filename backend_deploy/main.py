@@ -8,6 +8,8 @@ from typing import Optional
 import traceback  # Add this import
 import time
 from fastapi.middleware.cors import CORSMiddleware
+import asyncio
+import re
 
 
 app = FastAPI()
@@ -19,26 +21,18 @@ app.add_middleware(
     allow_methods=["*"],  # Allow all methods including OPTIONS
     allow_headers=["*"],  # Allow all headers
 )
-class DeployRequest(BaseModel):
-    project_path: str
 
-class DeployResponse(BaseModel):
-    url: str
-    success: bool
-    message: str
-
-# Add these new models
 class TestRequest(BaseModel):
     message: str
-    image_data: Optional[str] = None  # base64 encoded image
+    image_data: Optional[str] = None
 
 class TestResponse(BaseModel):
     success: bool
     message: str
     received_data: dict
     backend_timestamp: str
+    local_url: Optional[str] = None 
 
-# Add this test route (before your existing /deploy route)
 @app.post("/test", response_model=TestResponse)
 async def test_endpoint(request: TestRequest):
     """
@@ -54,235 +48,94 @@ async def test_endpoint(request: TestRequest):
     else:
         print("📭 No image data received")
     
-    # Print all headers and request info
+    local_url = None
+    project_path = "../frontend"
+    package_json_path = os.path.join(project_path, "package.json")
+    if not os.path.exists(package_json_path):
+        print(f"❌ package.json not found at: {package_json_path}")
+        raise HTTPException(status_code=400, detail="Not a valid React project (package.json not found)")
+
+    print("🏗️ Starting build and start process...")
+    try:
+        local_url = await build_and_start(project_path)
+        print(f"✅ Local URL obtained: {local_url}")
+    except Exception as e:
+        print(f"❌ Build and start failed: {e}")
+    
     print("📋 Request details logged successfully")
     
     return TestResponse(
         success=True,
-        message="Backend received your data successfully!",
+        message="Backend received your data successfully!" + (f" Local server started at {local_url}" if local_url else ""),
         received_data={
             "message": request.message,
             "has_image": bool(request.image_data),
-            "image_size": len(request.image_data) if request.image_data else 0
+            "image_size": len(request.image_data) if request.image_data else 0,
+            "local_url": local_url
         },
-        backend_timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
+        backend_timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+        local_url=local_url
     )
 
-
-@app.post("/deploy", response_model=DeployResponse)
-async def deploy_react_app(request: DeployRequest):
-    """
-    Build and deploy existing React project from folder
-    """
-    try:
-        project_path = request.project_path
-        print(f"Received request for project: {project_path}")  # Debug log
-        
-        # Validate project path
-        if not os.path.exists(project_path):
-            print(f"Path does not exist: {project_path}")  # Debug log
-            raise HTTPException(status_code=400, detail="Project path does not exist")
-        
-        package_json_path = os.path.join(project_path, "package.json")
-        if not os.path.exists(package_json_path):
-            print(f"package.json not found at: {package_json_path}")  # Debug log
-            raise HTTPException(status_code=400, detail="Not a valid React project (package.json not found)")
-        
-        # Validate Netlify token
-        netlify_token = "nfp_wcwS4sWKycMsWBr7Cu7c7m7rBhpGNYUBb854"
-        if not netlify_token:
-            raise HTTPException(status_code=500, detail="Netlify token not configured")
-        
-        print("Starting build and deploy process...")  # Debug log
-        # Build and deploy
-        url = await build_and_deploy(project_path, netlify_token)
-        
-        return DeployResponse(
-            url=url,
-            success=True,
-            message="App deployed successfully"
-        )
-        
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
-    except Exception as e:
-        # Print full error traceback
-        print(f"Unexpected error: {str(e)}")
-        print(traceback.format_exc())  # This will show the full error stack
-        raise HTTPException(status_code=500, detail=f"Deployment failed: {str(e)}")
-
-async def build_and_deploy(project_path: str, netlify_token: str) -> str:
+async def build_and_start(project_path: str) -> str:
     """Build existing React project and deploy to Netlify"""
-    
-    # Install dependencies
-    print(f"Installing dependencies in {project_path}...")
-    result = subprocess.run(
-        ["npm", "install"], 
-        cwd=project_path, 
-        capture_output=True, 
-        text=True,
-        timeout=300
+     # 1️⃣ Install dependencies
+    print("Installing dependencies...")
+    install = await asyncio.create_subprocess_exec(
+        "npm", "install",
+        cwd=project_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
     )
-    if result.returncode != 0:
-        error_msg = f"npm install failed: {result.stderr}"
-        print(error_msg)
-        raise Exception(error_msg)
-    print("✅ npm install successful")
+    await install.wait()
+    print("✅ npm install complete")
 
-   # Build the app
-    print("Building React app...")
-    # Check available build scripts
+    # 2️⃣ Read package.json to determine run script
     package_json_path = os.path.join(project_path, "package.json")
-    with open(package_json_path, 'r') as f:
-        package_data = json.load(f)
+    with open(package_json_path, "r") as f:
+        package = json.load(f)
 
-    # Define build_script with a default value FIRST
-    build_script = "build"  # Default value
+    run_script = None
+    scripts = package.get("scripts", {})
 
-    if "scripts" in package_data:
-        available_scripts = package_data["scripts"]
-        print(f"Available scripts: {available_scripts}")
-        
-        if "build" in available_scripts:
-            build_script = "build"
-        elif "build:prod" in available_scripts:
-            build_script = "build:prod"
-        else:
-            raise Exception(f"No build script found. Available: {list(available_scripts.keys())}")
-
-    print(f"Using build script: {build_script}")
-    result = subprocess.run(
-        ["npm", "run", build_script], 
-        cwd=project_path, 
-        capture_output=True, 
-        text=True,
-        timeout=300  # Add timeout
-    )
-
-    # Print BOTH stdout and stderr for debugging
-    print(f"Build STDOUT: {result.stdout}")
-    print(f"Build STDERR: {result.stderr}")
-    print(f"Build return code: {result.returncode}")
-
-    if result.returncode != 0:
-        raise Exception(f"Build failed: {result.stderr}\n{result.stdout}")
-    print("✅ Build successful")
-
-    # Determine build output directory
-    build_dir = "dist"
-    if os.path.exists(os.path.join(project_path, "build")):
-        build_dir = "build"
-    elif os.path.exists(os.path.join(project_path, "dist")):
-        build_dir = "dist"
-    
-    build_output_path = os.path.join(project_path, build_dir)
-    
-    if not os.path.exists(build_output_path):
-        raise Exception(f"Build output directory not found: {build_dir}")
-    print(f"✅ Build output found: {build_output_path}")
-
-    # Deploy to Netlify
-    print("Deploying to Netlify...")
-    
-    # Install Netlify CLI if not present
-    print("Installing Netlify CLI...")
-    result = subprocess.run(
-        ["npm", "install", "-g", "netlify-cli"], 
-        capture_output=True, 
-        text=True
-    )
-    if result.returncode != 0:
-        print(f"⚠️ Netlify CLI install warning: {result.stderr}")
+    if "dev" in scripts:
+        run_script = "dev"        # Vite, Next.js, etc.
+    elif "start" in scripts:
+        run_script = "start"      # CRA, default node start
     else:
-        print("✅ Netlify CLI installed")
+        raise Exception("No dev or start script found in package.json.")
 
-    # Test Netlify CLI
-    result = subprocess.run(
-        ["netlify", "--version"],
-        capture_output=True,
-        text=True
+    print(f"Using script: npm run {run_script}")
+
+    # 3️⃣ Run local dev server
+    process = await asyncio.create_subprocess_exec(
+        "npm", "run", run_script,
+        cwd=project_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
     )
-    print(f"Netlify CLI version: {result.stdout}")
-    # Test Netlify authentication first
-    print("Testing Netlify authentication...")
-    auth_test = subprocess.run([
-        "npx", "netlify", "status",
-        "--auth", netlify_token
-    ], capture_output=True, text=True, timeout=30)
-    
-    print(f"Auth test STDOUT: {auth_test.stdout}")
-    print(f"Auth test STDERR: {auth_test.stderr}")
-    print(f"Auth test return code: {auth_test.returncode}")
 
-    # Deploy with detailed logging
-    print(f"Running Netlify deploy with token: {netlify_token[:10]}...")
-    
-    # Deploy to Netlify
-    print("Deploying to Netlify...")
-    
-    # First, create a new site using the Netlify API
-    import urllib.request
-    import urllib.error
-    
-    print("Creating new Netlify site...")
-    
-    site_name = f"react-preview-{int(time.time())}"
-    
-    create_site_req = urllib.request.Request(
-        "https://api.netlify.com/api/v1/sites",
-        data=json.dumps({"name": site_name}).encode('utf-8'),
-        headers={
-            "Authorization": f"Bearer {netlify_token}",
-            "Content-Type": "application/json"
-        },
-        method="POST"
-    )
-    
-    try:
-        with urllib.request.urlopen(create_site_req) as response:
-            site_data = json.loads(response.read().decode())
-            site_id = site_data["site_id"]
-            print(f"✅ Created site: {site_id}")
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode()
-        print(f"Failed to create site: {error_body}")
-        raise Exception(f"Failed to create Netlify site: {error_body}")
+    url_regex = re.compile(r"(http://localhost:\d+)")
+    url_found = None
 
-    # Now deploy to the created site using the site_id
-    print(f"Deploying to site {site_id}...")
-    
-    result = subprocess.run([
-        "npx", "netlify", "deploy",
-        "--auth", netlify_token,
-        "--site", site_id,  # Use the actual site_id from API
-        "--dir", build_output_path,
-        "--prod",
-        "--json",
-        "--message", "Auto-deploy from React chat"
-    ], capture_output=True, text=True, cwd=project_path, timeout=120)
+    print("Waiting for local server to start...")
 
-    # Parse Netlify response to get URL
-    try:
-        deploy_data = json.loads(result.stdout)
-        print(f"Netlify response data: {deploy_data}")
-        
-        site_url = deploy_data.get("deploy_url") or deploy_data.get("live_url") or deploy_data.get("url")
-        if site_url:
-            print(f"✅ Deployment successful: {site_url}")
-            return site_url
-        else:
-            # Get site ID and construct URL
-            site_id = deploy_data.get("site_id")
-            if site_id:
-                url = f"https://{site_id}.netlify.app"
-                print(f"✅ Deployment successful: {url}")
-                return url
-            else:
-                raise Exception("No URL or site_id found in Netlify response")
-    except Exception as e:
-        print(f"Error parsing Netlify response: {e}")
-        raise Exception(f"Failed to parse Netlify response: {e}")
+    # 4️⃣ Read output in real time until we detect URL
+    while True:
+        line = await process.stdout.readline()
+        if not line:
+            break
+
+        decoded = line.decode("utf-8").strip()
+        print(decoded)
+
+        match = url_regex.search(decoded)
+        if match:
+            url_found = match.group(1)
+            print(f"🎉 Found local URL: {url_found}")
+            return url_found  # return immediately
+
+    raise Exception("Could not detect local development URL.")
 
 if __name__ == "__main__":
     import uvicorn

@@ -11,7 +11,6 @@ const CodePreview: React.FC<CodePreviewProps> = ({ initialCode }) => {
 
     useEffect(() => {
         if (initialCode && initialCode.trim()) {
-            // For testing, use a hardcoded URL instead of building
             simulateBuildProcess()
         } else {
             setBuildUrl('')
@@ -23,14 +22,7 @@ const CodePreview: React.FC<CodePreviewProps> = ({ initialCode }) => {
 
         // Simulate build time
         setTimeout(() => {
-            // Use one of these public React app URLs for testing:
-            const testUrls = [
-                'https://6922473187d6fcabc4f8e3e5--react-preview-1763854124.netlify.app',
-            ]
-
-            // Pick a random demo app URL
-            const randomUrl = testUrls[Math.floor(Math.random() * testUrls.length)]
-            setBuildUrl(randomUrl)
+            setBuildUrl(initialCode)
             setIsBuilding(false)
         }, 2000) // 2 second "build" simulation
     }

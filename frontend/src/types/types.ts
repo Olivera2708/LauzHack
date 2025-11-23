@@ -5,12 +5,5 @@ export interface Message {
     role: 'user' | 'assistant';
     timestamp: Date;
     image: string | undefined;
-}
-
-export interface ChatState {
-    messages: Message[];
-    input: string;
-    isLoading: boolean;
-    darkMode: boolean;
-    copiedId: string | null;
+    local_url: string | undefined;
 }

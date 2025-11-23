@@ -43,39 +43,6 @@ const Home: React.FC = () => {
         scrollToBottom();
     }, [messages]);
 
-    // Extract code from messages and update preview
-    useEffect(() => {
-        console.log('Messages changed:', messages); // Debug log
-
-        // Find the latest assistant message with code blocks
-        const latestAssistantMessage = [...messages]
-            .reverse()
-            .find(message => message.role === 'assistant');
-
-        if (latestAssistantMessage) {
-            console.log('Latest assistant message:', latestAssistantMessage.content); // Debug log
-
-            // Improved regex to capture code blocks
-            const codeBlockRegex = /```(?:typescript|javascript|jsx|tsx)?\s*\n([\s\S]*?)```/;
-            const codeMatch = latestAssistantMessage.content.match(codeBlockRegex);
-
-            console.log('Code match:', codeMatch); // Debug log
-
-            if (codeMatch && codeMatch[1]) {
-                const extractedCode = codeMatch[1].trim();
-                console.log('Extracted code:', extractedCode); // Debug log
-                setPreviewCode(extractedCode);
-            } else {
-                console.log('No code block found or code block is empty');
-                // Set a default message if no code is found
-                setPreviewCode('// No code to preview yet. Send a message to see code here.');
-            }
-        } else {
-            console.log('No assistant messages found');
-            setPreviewCode('// No code to preview yet. Send a message to see code here.');
-        }
-    }, [messages]);
-
     const handleSend = async (): Promise<void> => {
         if ((!input.trim() && !selectedImage) || isLoading) return;
 
@@ -101,7 +68,8 @@ const Home: React.FC = () => {
                 },
                 body: JSON.stringify({
                     message: input,
-                    image_data: selectedImage ? imagePreview : null
+                    image_data: selectedImage ? imagePreview : null,
+                    project_path: "../frontend"  // Add the project path here
                 })
             });
 
@@ -113,9 +81,19 @@ const Home: React.FC = () => {
             console.log('✅ Backend response:', data);
 
             // Create AI response based on backend reply
+            let aiContent = `Backend says: "${data.message}"\n\n`;
+            aiContent += `Received at: ${data.backend_timestamp}\n\n`;
+            aiContent += `Data: ${JSON.stringify(data.received_data, null, 2)}`;
+
+            // Add local URL to the message if available
+            if (data.local_url) {
+                aiContent += `\n\n🌐 **Local Server Started**: ${data.local_url}`;
+                setPreviewCode(data.local_url);
+            }
+
             const aiMessage: Message = {
                 id: (Date.now() + 1).toString(),
-                content: `Backend says: "${data.message}"\n\nReceived at: ${data.backend_timestamp}\n\nData: ${JSON.stringify(data.received_data, null, 2)}`,
+                content: aiContent,
                 role: 'assistant',
                 timestamp: new Date()
             };
