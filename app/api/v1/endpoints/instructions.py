@@ -3,6 +3,8 @@ import os
 import shutil
 import zipfile
 import tempfile
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from fastapi import APIRouter, Body
 from fastapi.responses import FileResponse
@@ -11,6 +13,10 @@ from app.services.junior_dev import implement_component
 from app.schemas.plan import ChatResponse, OrchestrationPlan
 
 router = APIRouter()
+
+def _run_implement_component(file_plan, global_style, session_id):
+    """Helper function to run async implement_component in a thread."""
+    return asyncio.run(implement_component(file_plan, global_style, session_id))
 
 @router.post("/process")
 async def process_instructions(
@@ -50,20 +56,36 @@ async def process_instructions(
         for idx, file_plan in enumerate(plan.files):
             print(f"[process_instructions]   File {idx+1}: {file_plan.filename} at {file_plan.path}")
         
-        # Step 3: Call multiple junior_dev agents in parallel
+        # Step 3: Call multiple junior_dev agents in parallel with separate session_ids
         print("[process_instructions] Step 3: Creating parallel implementation tasks...")
-        implementation_tasks = [
-            implement_component(
-                file_plan=file_plan,
-                global_style=plan.global_style.dict() if plan.global_style else None,
-                session_id=session_id
-            )
+        
+        # Generate unique session_id (pure UUID) for each file implementation
+        file_plans_with_sessions = [
+            (file_plan, str(uuid.uuid4()))  # Unique UUID session_id for each
             for file_plan in plan.files
         ]
-        print(f"[process_instructions] Created {len(implementation_tasks)} parallel tasks")
+        print(f"[process_instructions] Created {len(file_plans_with_sessions)} parallel tasks with separate session_ids")
         
-        print("[process_instructions] Executing parallel agent calls...")
-        implementations = await asyncio.gather(*implementation_tasks, return_exceptions=True)
+        # Execute in truly parallel threads - wrap blocking API calls in threads
+        print("[process_instructions] Executing parallel agent calls in threads...")
+        loop = asyncio.get_event_loop()
+        
+        # Create a ThreadPoolExecutor for true parallel execution
+        global_style_dict = plan.global_style.dict() if plan.global_style else None
+        with ThreadPoolExecutor(max_workers=len(file_plans_with_sessions)) as executor:
+            # Run each blocking API call in a separate thread
+            implementation_tasks = [
+                loop.run_in_executor(
+                    executor,
+                    _run_implement_component,
+                    file_plan,
+                    global_style_dict,
+                    session_id
+                )
+                for file_plan, session_id in file_plans_with_sessions
+            ]
+            implementations = await asyncio.gather(*implementation_tasks, return_exceptions=True)
+        
         print(f"[process_instructions] Parallel execution completed - {len(implementations)} results received")
         
         # Step 4: Create a temporary directory for the new template

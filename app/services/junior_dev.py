@@ -279,7 +279,7 @@ def _prepare_implementation_request(
         Formatted implementation request string
     """
     request_parts = [
-        f"Please implement the React component: {file_plan.filename}",
+        f"Implement the React component: {file_plan.filename}",
         "",
         "**Component Specifications:**",
         f"- Filename: {file_plan.filename}",
